@@ -47,7 +47,7 @@ def trigger(mig_id, phase_key):
 def _run_guarded(mig_id, phase_key):
     try:
         fn = {"document": run_document, "scaffold": run_scaffold,
-              "test": run_test, "deploy": run_deploy, "autorun": run_auto}.get(phase_key)
+              "test": run_test, "deploy": run_deploy, "autorun": run_auto, "spec": run_spec}.get(phase_key)
         if fn:
             fn(mig_id)
     except Exception as e:  # never let a worker die silently
@@ -60,14 +60,62 @@ def _run_guarded(mig_id, phase_key):
 
 # ------------------------------------------------------------- Auto pipeline
 
+def _is_spec(mig):
+    return mig.get("sourceType") == "spec" or (mig.get("sourceFile") or "").endswith(".spec.json")
+
+
 def run_auto(mig_id):
     """One-click: run the fully automated phases (document, then scaffold)."""
     run_document(mig_id)
     mig = store.get(mig_id)
+    if _is_spec(mig):
+        _update(mig_id, lambda m: M.log(m, "spec pipeline finished (documents + service generated); "
+                                           "implement, test and deploy are next"))
+        return
     if M.phase(mig, "document")["status"] == M.DONE:
         run_scaffold(mig_id)
     _update(mig_id, lambda m: M.log(m, "auto pipeline finished; mapping review & "
                                        "implementation are the next human steps"))
+
+
+def run_spec(mig_id):
+    """Generate documents + a WSO2 service from a Functionality/Mapping spec (no source code)."""
+    r = get_runner()
+    mig = store.get(mig_id)
+    fname = os.path.basename(mig["sourceFile"])
+    host_src = f"{PLATFORM_DIR}/.mt-uploads/{fname}"
+    _update(mig_id, lambda m: (M.set_phase(m, "upload", M.RUNNING),
+                               M.set_step(m, "upload", "receive", M.RUNNING)))
+    r.put(mig["sourceFile"], host_src)
+    _update(mig_id, lambda m: (M.set_step(m, "upload", "receive", M.DONE, fname),
+                               M.set_step(m, "upload", "detect", M.DONE, "spec"),
+                               M.set_phase(m, "document", M.RUNNING),
+                               M.log(m, "genspec: generating documents + service from the spec")))
+    services = f"{PLATFORM_DIR}/services"
+    gen = f"{PLATFORM_DIR}/docs/generated"
+    before = set(r.listdir(services))
+    res = r.run(f"python3 -m factory genspec {_q(host_src)} --out {_q(services)} --docs {_q(gen)}",
+                cwd=f"{PLATFORM_DIR}/migration-factory", timeout=600)
+    if not res.ok:
+        _update(mig_id, lambda m: (M.set_step(m, "document", "ingest", M.FAILED, (res.err or res.out)[-300:]),
+                                   M.log(m, (res.err or res.out)[-600:], "error")))
+        return
+    svc = next(iter(set(r.listdir(services)) - before), mig.get("apiName"))
+    for s in ("ingest", "parse", "model", "technical", "mapping_doc", "functional", "estimate", "portfolio"):
+        _update(mig_id, lambda m, s=s: M.set_step(m, "document", s, M.DONE))
+    for s in ("generate", "compile_check"):
+        _update(mig_id, lambda m, s=s: M.set_step(m, "scaffold", s, M.DONE))
+    _ensure_in_workspace(r, svc)
+
+    def _fin(m):
+        m["apiName"] = svc
+        m["serviceDir"] = f"services/{svc}" if svc else None
+        M.set_phase(m, "upload", M.DONE)
+        M.set_step(m, "implement", "core", M.ACTION, "fill in the field mapping / logic")
+        M.set_step(m, "implement", "wiring", M.ACTION, "wire HTTP & config")
+        M.set_step(m, "implement", "unit", M.ACTION, "add unit tests")
+        M.log(m, f"generated {svc} from the spec; implement, test and deploy next")
+    _update(mig_id, _fin)
 
 
 # ---------------------------------------------------------------- Document
@@ -75,6 +123,8 @@ def run_auto(mig_id):
 def run_document(mig_id):
     r = get_runner()
     mig = store.get(mig_id)
+    if _is_spec(mig):
+        return run_spec(mig_id)
     local_src = mig["sourceFile"]
     fname = os.path.basename(local_src)
 
@@ -153,6 +203,9 @@ def run_document(mig_id):
 def run_scaffold(mig_id):
     r = get_runner()
     mig = store.get(mig_id)
+    if _is_spec(mig):
+        _update(mig_id, lambda m: M.log(m, "scaffold was generated from the spec (genspec)"))
+        return
     fname = os.path.basename(mig["sourceFile"])
     host_src = f"{PLATFORM_DIR}/.mt-uploads/{fname}"
     if not r.exists(host_src):

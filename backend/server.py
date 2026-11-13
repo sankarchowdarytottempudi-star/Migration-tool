@@ -23,6 +23,18 @@ PROXY_TARGETS = {
     "zoho": "http://zoho-sys-api.wso2.svc",
 }
 
+# Representative request per service, used for latency measurement in the optimizer.
+_GQL = '{"query":"query AvailableVoyages { availableVoyages { pkg { key } } }"}'
+SVC_PRESETS = {
+    "exp": ("POST", "/reservation-mgr-exp-api/v1/integration-tasks",
+            {"Authorization": "Bearer e2e-secret-token-123", "client_channel": "web", "Content-Type": "application/json"}, _GQL),
+    "sys": ("POST", "/seaware-sys-api/v1/integration-tasks",
+            {"Authorization": "Bearer e2e-secret-token-123", "Content-Type": "application/json"}, _GQL),
+    "proc": ("POST", "/seaware-cache-proc-api/v1/cache",
+             {"operationName": "availableVoyages", "Content-Type": "application/json"}, _GQL),
+    "zoho": ("GET", "/health/ready", {}, ""),
+}
+
 import env_store
 import kb
 import model as M
@@ -63,6 +75,48 @@ def _slo(ms):
     if ms <= SLO_MAX_MS:
         return "ok"
     return "slow"
+
+
+def _service_for_migration(mig):
+    api = (mig.get("apiName") or "").lower()
+    for frag, key in (("reservation-mgr-exp", "exp"), ("seaware-sys", "sys"),
+                      ("seaware-cache-proc", "proc"), ("zoho", "zoho")):
+        if frag in api:
+            return key
+    return {"experience": "exp", "system": "sys", "process": "proc"}.get(mig.get("layer"))
+
+
+def _json_diff(a, b):
+    """Structural diff of two JSON response bodies; [] means identical."""
+    import json as _j
+    try:
+        ja, jb = _j.loads(a), _j.loads(b)
+    except Exception:
+        return [] if a.strip() == b.strip() else [{"path": "(body)", "legacy": a[:120], "migrated": b[:120]}]
+    out = []
+
+    def walk(x, y, p):
+        if type(x) != type(y):
+            out.append({"path": p or "/", "legacy": str(x)[:80], "migrated": str(y)[:80]})
+        elif isinstance(x, dict):
+            for k in sorted(set(x) | set(y)):
+                if k not in x:
+                    out.append({"path": p + "/" + k, "legacy": "(missing)", "migrated": str(y[k])[:80]})
+                elif k not in y:
+                    out.append({"path": p + "/" + k, "legacy": str(x[k])[:80], "migrated": "(missing)"})
+                else:
+                    walk(x[k], y[k], p + "/" + k)
+        elif isinstance(x, list):
+            if len(x) != len(y):
+                out.append({"path": p, "legacy": f"[{len(x)} items]", "migrated": f"[{len(y)} items]"})
+            else:
+                for i, (xi, yi) in enumerate(zip(x, y)):
+                    walk(xi, yi, f"{p}[{i}]")
+        elif x != y:
+            out.append({"path": p or "/", "legacy": str(x)[:80], "migrated": str(y)[:80]})
+
+    walk(ja, jb, "")
+    return out
 
 _DOC_NAMES = {"TECHNICAL.md", "MAPPING.md", "FUNCTIONAL.md", "ESTIMATE.md", "inventory.json"}
 
@@ -244,6 +298,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._feedback(mid)
             if parts[4] == "verify":
                 return self._verify(mid)
+            if parts[4] == "parity":
+                return self._parity(mid)
+            if parts[4] == "optimize":
+                return self._optimize(mid)
         return self._json(404, {"error": "not found"})
 
     def _create_env(self):
@@ -324,6 +382,67 @@ class Handler(BaseHTTPRequestHandler):
             store.save(m)
         return self._json(200, {"ok": ok, "status": status, "body": text, "ms": ms, "slo": slo})
 
+    def _parity(self, mid):
+        """Call the legacy environment and the migrated API with the same request; diff them."""
+        try:
+            payload = json.loads(self._body() or b"{}")
+        except ValueError:
+            return self._json(400, {"error": "bad json"})
+        mig = store.get(mid)
+        env = env_store.get(payload.get("envId"))
+        if not env:
+            return self._json(400, {"error": "choose a legacy environment"})
+        path, method = payload.get("path", "/"), payload.get("method", "POST")
+        body = payload.get("body")
+        lheaders = dict(payload.get("headers") or {})
+        if env.get("token") and not any(k.lower() == "authorization" for k in lheaders):
+            lheaders["Authorization"] = "Bearer " + env["token"]
+        ls, lb, lms = _http_call(env["baseUrl"], path, method, lheaders, body)
+        svc = _service_for_migration(mig)
+        base = PROXY_TARGETS.get(svc)
+        if base:
+            ms_, mb, mms = _http_call(base, path, method, payload.get("headers") or {}, body)
+        else:
+            ms_, mb, mms = 0, "no migrated target", 0
+        diff = _json_diff(lb, mb)
+        return self._json(200, {
+            "legacy": {"status": ls, "ms": lms, "slo": _slo(lms), "body": lb},
+            "migrated": {"status": ms_, "ms": mms, "slo": _slo(mms), "body": mb},
+            "match": ls == ms_ and not diff, "diff": diff[:50]})
+
+    def _optimize(self, mid):
+        """Measure the migrated API, apply a real optimization (add a replica), re-measure."""
+        mig = store.get(mid)
+        api = mig.get("apiName")
+        svc = _service_for_migration(mig)
+        preset = SVC_PRESETS.get(svc)
+        base = PROXY_TARGETS.get(svc)
+        if not api or not preset or not base:
+            return self._json(400, {"error": "nothing to optimize for this migration"})
+        method, path, headers, body = preset
+
+        def median(n=5):
+            xs = [_http_call(base, path, method, headers, body)[2] for _ in range(n)]
+            return sorted(xs)[len(xs) // 2]
+
+        before = median()
+        r = get_runner()
+        actions = []
+        r.run(f"kubectl -n wso2 scale deployment/{api} --replicas=2")
+        r.run(f"kubectl -n wso2 rollout status deployment/{api} --timeout=120s")
+        actions.append("scaled to 2 replicas")
+        after = median()
+        met = after <= SLO_MAX_MS
+        with store.lock():
+            m = store.get(mid)
+            m["optimization"] = {"beforeMs": before, "afterMs": after, "actions": actions,
+                                 "meetsTarget": met, "at": M._now()}
+            M.log(m, f"optimizer: {before} ms -> {after} ms ({', '.join(actions)}); "
+                     f"target {'met' if met else 'still missed'}")
+            store.save(m)
+        return self._json(200, {"beforeMs": before, "afterMs": after, "actions": actions,
+                                "meetsTarget": met, "fastMs": SLO_FAST_MS, "maxMs": SLO_MAX_MS})
+
     def _feedback(self, mid):
         try:
             payload = json.loads(self._body() or b"{}")
@@ -383,6 +502,8 @@ class Handler(BaseHTTPRequestHandler):
         with open(dest, "wb") as f:
             f.write(data)
         mig = M.new_migration(name, dest, workspace=workspace)
+        if (self.headers.get("X-Source-Type") or "").lower() == "spec":
+            mig["sourceType"] = "spec"
         store.save(mig)
         return self._json(201, M.summarize(mig))
 

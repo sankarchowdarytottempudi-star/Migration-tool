@@ -6,6 +6,7 @@ const docsCache = {};   // id -> [{name}]
 const fbCache = {};     // id -> [feedback]
 let ENVS = [];          // registered environments
 const vfState = {};     // id -> {resp, envId} (kept across polls so the UI doesn't reset)
+const pState = {};      // id -> performance/parity output text
 
 async function loadEnvs() {
   try { ENVS = (await (await api("/api/environments")).json()).environments || []; }
@@ -145,6 +146,16 @@ function renderDetail(m) {
       </div>` : ""}
     </div>
 
+    <div class="section"><h3>Performance &amp; parity</h3>
+      <div class="pl-row">
+        <button onclick="optimizeMig('${m.id}')">⚡ Optimize performance</button>
+        <button onclick="parityMig('${m.id}')">⇄ Parity vs legacy (uses the env selected above)</button>
+      </div>
+      ${m.optimization ? `<div class="muted sm">Last optimize: ${m.optimization.beforeMs}ms → ${m.optimization.afterMs}ms
+        (${(m.optimization.actions||[]).join(", ")}) — target ${m.optimization.meetsTarget ? "met ✓" : "missed"}</div>` : ""}
+      <pre id="pResp" class="resp">${esc(pState[m.id] || "Targets: ≤250 ms ideal, ≤1 s max.")}</pre>
+    </div>
+
     <div class="section"><h3>Reviewer feedback</h3>
       ${feedbackFormHTML(m)}
       ${fb.length ? fb.map(fbHTML).join("") : '<div class="muted">No feedback yet.</div>'}
@@ -244,7 +255,28 @@ async function regEnv(id,name,cand){
   await loadEnvs(); refreshDetail();
 }
 window.regEnv=regEnv;
-window.run=run;window.advance=advance;window.delMig=delMig;window.dlDoc=dlDoc;window.submitFeedback=submitFeedback;window.verifyMig=verifyMig;
+async function parityMig(id){
+  const envId=$("#vfEnv")?$("#vfEnv").value:"";
+  if(!envId){ pState[id]="Select an environment in Environment verification first."; return refreshDetail(); }
+  const m=await (await api(`/api/migrations/${id}`)).json(); const pr=presetForMigration(m);
+  const headers={...pr.headers}; delete headers.Authorization;
+  pState[id]="…comparing legacy vs migrated"; refreshDetail();
+  const d=await (await api(`/api/migrations/${id}/parity`,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({envId,method:pr.method,path:pr.path,headers,body:pr.body})})).json();
+  let s=(d.match?"✓ MATCH — migrated response equals legacy":"✗ DIFFERENCES: "+(d.diff||[]).length)+"\n";
+  s+="legacy:   HTTP "+d.legacy.status+" · "+d.legacy.ms+" ms ("+d.legacy.slo+")\n";
+  s+="migrated: HTTP "+d.migrated.status+" · "+d.migrated.ms+" ms ("+d.migrated.slo+")\n";
+  if((d.diff||[]).length) s+="\n"+d.diff.map(x=>" "+x.path+": legacy="+x.legacy+" | migrated="+x.migrated).join("\n");
+  pState[id]=s; refreshDetail();
+}
+async function optimizeMig(id){
+  pState[id]="…measuring and optimizing (adds a replica, re-measures)"; refreshDetail();
+  const d=await (await api(`/api/migrations/${id}/optimize`,{method:"POST"})).json();
+  pState[id]=d.error?("error: "+d.error):("Before "+d.beforeMs+" ms → After "+d.afterMs+" ms\n"
+    +"Actions: "+(d.actions||[]).join(", ")+"\nTarget ≤"+d.maxMs+" ms: "+(d.meetsTarget?"met ✓":"still missed"));
+  await loadList(); refreshDetail();
+}
+window.run=run;window.advance=advance;window.delMig=delMig;window.dlDoc=dlDoc;window.submitFeedback=submitFeedback;window.verifyMig=verifyMig;window.parityMig=parityMig;window.optimizeMig=optimizeMig;
 
 // ---------- knowledge base modal ----------
 $("#kbBtn").addEventListener("click", async () => {
@@ -310,8 +342,9 @@ $("#newForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = $("#mName").value.trim(), ws = $("#mWorkspace").value.trim(), file = $("#mFile").files[0];
   if (!name || !file) { $("#newError").textContent = "Name and file required."; return; }
-  const r = await api("/api/migrations", { method: "POST",
-    headers: { "X-Name": name, "X-Filename": file.name, "X-Workspace": ws }, body: file });
+  const hdrs = { "X-Name": name, "X-Filename": file.name, "X-Workspace": ws };
+  if ($("#mSpec") && $("#mSpec").checked) hdrs["X-Source-Type"] = "spec";
+  const r = await api("/api/migrations", { method: "POST", headers: hdrs, body: file });
   if (r.ok) { const m = await r.json(); $("#modal").classList.add("hidden");
     $("#mName").value = ""; $("#mFile").value = ""; await loadList(); select(m.id); }
   else $("#newError").textContent = "Upload failed.";
