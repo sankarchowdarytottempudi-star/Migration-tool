@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Migration Tool</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div id="login" class="login hidden">
+  <form id="loginForm" class="card">
+    <h1>Migration Tool</h1>
+    <p class="muted">Enter the admin token to continue.</p>
+    <input id="tokenInput" type="password" placeholder="Admin token" autocomplete="off">
+    <button type="submit">Unlock</button>
+    <p id="loginError" class="err"></p>
+  </form>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="brand"><span class="dot"></span> Migration Tool</div>
+    <div class="head-stats" id="headStats"></div>
+    <div class="head-actions">
+      <button id="newBtn" class="primary">+ New migration</button>
+      <button id="logoutBtn" class="ghost">Lock</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="list" id="list"></section>
+    <section class="detail" id="detail">
+      <div class="empty">Select a migration to see its progress.</div>
+    </section>
+  </main>
+</div>
+
+<div id="modal" class="modal hidden">
+  <form class="card" id="newForm">
+    <h2>New migration</h2>
+    <label>Name</label>
+    <input id="mName" placeholder="e.g. Loyalty Experience API">
+    <label>Source export (.zip / .jar)</label>
+    <input id="mFile" type="file">
+    <div class="row-end">
+      <button type="button" class="ghost" id="cancelNew">Cancel</button>
+      <button type="submit" class="primary">Create</button>
+    </div>
+    <p id="newError" class="err"></p>
+  </form>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
