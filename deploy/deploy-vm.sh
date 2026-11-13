@@ -22,6 +22,9 @@ fi
 grep -qF "$(cat "$KEY".pub)" ~/.ssh/authorized_keys 2>/dev/null || cat "$KEY".pub >> ~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys
 
+# data dir the pod (uid 10001) writes to
+mkdir -p /root/migration-tool-data && chmod 777 /root/migration-tool-data
+
 NODE_IP=$(hostname -I | awk '{print $1}')
 log "host target: root@${NODE_IP}"
 

@@ -98,3 +98,37 @@ main{display:grid;grid-template-columns:380px 1fr;gap:18px;padding:18px 22px;ali
   padding:12px;max-height:200px;overflow:auto;font-family:ui-monospace,Menlo,monospace;font-size:12px}
 .log .ln{color:var(--muted);white-space:pre-wrap}
 .log .ln.error{color:var(--fail)} .log .ln.warn{color:var(--run)}
+
+/* ---- v2: workspaces, outcomes, docs, feedback, knowledge base ---- */
+.ws{margin-bottom:8px}
+.ws-head{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);
+  margin:4px 2px 8px;font-weight:600}
+.oc{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line)}
+.oc-deployed{color:#7ee787;border-color:#238636}
+.oc-failed{color:var(--fail);border-color:var(--fail)}
+.oc-in-progress{color:var(--run);border-color:var(--run)}
+.oc-complete{color:#7ee787;border-color:#238636}
+.oc-not-started{color:var(--muted)}
+.d-title .oc{vertical-align:middle;margin-left:8px}
+.lf{color:var(--action)}
+.section{margin-top:22px}
+.section h3{margin:0 0 10px;font-size:14px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.docs{display:flex;flex-wrap:wrap;gap:10px}
+.doc{background:var(--panel2)}
+.wide{width:720px;max-width:94vw;max-height:86vh;overflow:auto}
+.row-between{display:flex;justify-content:space-between;align-items:center}
+.sm{font-size:12px;margin:0 0 8px}
+
+/* feedback */
+.fbform{display:grid;gap:8px;margin-bottom:14px}
+.fbform select,.fbform input{margin:0}
+select{width:100%;padding:9px;border-radius:8px;border:1px solid var(--line);background:#0b0f14;color:var(--text)}
+.fb{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
+.fb-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.fb-scope{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.fb-scope.functional{color:var(--accent2);border-color:var(--accent2)}
+.fb-scope.workspace{color:#d2a8ff;border-color:#8957e5}
+.fb-scope.api{color:var(--muted)}
+.fb-status{font-size:11px;color:var(--muted)}
+.fb-status.applied{color:var(--ok)}
+.fb-sum{font-weight:600} .fb ul{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:13px}

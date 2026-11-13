@@ -64,7 +64,11 @@ PHASE_ORDER = [p["key"] for p in PHASE_DEFS]
 _DEF_BY_KEY = {p["key"]: p for p in PHASE_DEFS}
 
 
-def new_migration(name: str, source_file: str, technology: str = "unknown") -> dict:
+DEFAULT_WORKSPACE = "Cruise Saudi Workspace"
+
+
+def new_migration(name: str, source_file: str, technology: str = "unknown",
+                  workspace: str = DEFAULT_WORKSPACE) -> dict:
     now = _now()
     phases = []
     for pdef in PHASE_DEFS:
@@ -78,9 +82,11 @@ def new_migration(name: str, source_file: str, technology: str = "unknown") -> d
     return {
         "id": uuid.uuid4().hex[:12],
         "name": name,
+        "workspace": workspace,
         "technology": technology,
         "sourceFile": source_file,
         "apiName": None,
+        "lessonsApplied": 0,
         "layer": None,
         "estimateDays": None,
         "createdAt": now,
@@ -193,8 +199,21 @@ def summarize(mig: dict) -> dict:
         "currentStep": _label(current),
         "nextStep": _label(nxt),
         "done": overall_pct >= 99.9,
+        "outcome": _outcome(mig, overall_pct),
     }
     return out
+
+
+def _outcome(mig, overall_pct):
+    if any(p["status"] == FAILED for p in mig["phases"]):
+        return "Failed"
+    if phase(mig, "deploy")["status"] == DONE:
+        return "Deployed"
+    if overall_pct >= 99.9:
+        return "Complete"
+    if overall_pct <= 0:
+        return "Not started"
+    return "In progress"
 
 
 def _find_step(mig, status):

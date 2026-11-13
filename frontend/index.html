@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-<div id="login" class="login hidden">
+<div id="login" class="login">
   <form id="loginForm" class="card">
     <h1>Migration Tool</h1>
     <p class="muted">Enter the admin token to continue.</p>
@@ -22,6 +22,7 @@
     <div class="brand"><span class="dot"></span> Migration Tool</div>
     <div class="head-stats" id="headStats"></div>
     <div class="head-actions">
+      <button id="kbBtn" class="ghost">Knowledge base</button>
       <button id="newBtn" class="primary">+ New migration</button>
       <button id="logoutBtn" class="ghost">Lock</button>
     </div>
@@ -38,6 +39,8 @@
 <div id="modal" class="modal hidden">
   <form class="card" id="newForm">
     <h2>New migration</h2>
+    <label>Workspace</label>
+    <input id="mWorkspace" value="Cruise Saudi Workspace">
     <label>Name</label>
     <input id="mName" placeholder="e.g. Loyalty Experience API">
     <label>Source export (.zip / .jar)</label>
@@ -48,6 +51,15 @@
     </div>
     <p id="newError" class="err"></p>
   </form>
+</div>
+
+<div id="kbModal" class="modal hidden">
+  <div class="card wide">
+    <div class="row-between"><h2>Knowledge base</h2><button class="ghost" id="kbClose">Close</button></div>
+    <p class="muted">Functional lessons are shared to every workspace and auto-applied to the same
+      kind of migration. Workspace and API lessons stay private to their scope.</p>
+    <div id="kbBody"></div>
+  </div>
 </div>
 
 <script src="/static/app.js"></script>

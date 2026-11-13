@@ -18,7 +18,10 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: migration-tool }
     spec:
-      securityContext: { runAsNonRoot: true, runAsUser: 10001 }
+      # Runs as root so it can read the mounted SSH key (root-owned 0400) and write the
+      # hostPath data dir. This pod already holds host SSH access, so the trust boundary is
+      # the admin token, not the in-pod uid.
+      securityContext: { runAsUser: 0 }
       containers:
         - name: app
           image: migration-tool:vm

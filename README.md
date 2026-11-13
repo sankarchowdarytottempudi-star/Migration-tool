@@ -50,6 +50,31 @@ cd ~/Migration-tool && bash deploy/deploy-vm.sh
 
 The pod drives the host over SSH using a dedicated key the script creates and authorizes.
 
+## Workspaces, history and documents
+
+- Every migration belongs to a **workspace** (default *Cruise Saudi Workspace*). The dashboard
+  groups APIs by workspace and shows each one's **outcome** — Deployed, Failed, In progress — so
+  the full history of what was attempted and how it ended is visible at a glance.
+- Once documents are generated, each one (Technical, Mapping, Functional, Estimate, inventory)
+  can be **downloaded** from the migration's detail view.
+
+## Knowledge base and the learning loop
+
+After reviewing the generated documents or scaffold, a user submits feedback on what went wrong.
+Each lesson has a **scope** that controls how far it travels:
+
+| Scope | Shared with | Use for |
+|-------|-------------|---------|
+| **Functional** | every workspace, matched by technology | approach/architecture gaps — e.g. the wrong way to pull API details or do the mapping. Fixes the same kind of migration everywhere. |
+| **Workspace** | only the originating workspace | workspace conventions; never leaks to other customers |
+| **API** | only the same API | customer-specific details (API names, field values) |
+
+On the next run the orchestrator collects the open lessons that apply (functional across all
+workspaces, workspace/API only within their scope), writes them to a knowledge file the factory's
+AI build agent reads, marks them **applied**, and records the count on the migration. So a
+functional gap reported by one customer is automatically avoided for every later migration of the
+same technology.
+
 ## Security
 
 - The control plane can trigger deploys and run commands on the host, so it is **never open**:

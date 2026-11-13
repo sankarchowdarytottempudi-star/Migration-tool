@@ -10,6 +10,7 @@ import os
 import threading
 
 from runner import get_runner, PLATFORM_DIR
+import kb
 import model as M
 import store
 
@@ -97,7 +98,9 @@ def run_document(mig_id):
                                M.set_step(m, "document", "ingest", M.RUNNING),
                                M.log(m, "factory analyze: unpacking and parsing the source")))
 
-    cmd = (f"python3 -m factory analyze {_q(host_src)} --out {_q(gen_root)}")
+    lessons_env = _apply_lessons(mig_id, r, mig.get("apiName"), mig.get("workspace"),
+                                 mig.get("technology"), f"{mig_id}:document")
+    cmd = (f"{lessons_env}python3 -m factory analyze {_q(host_src)} --out {_q(gen_root)}")
     res = r.run(cmd, cwd=f"{PLATFORM_DIR}/migration-factory", timeout=1200)
 
     if not res.ok:
@@ -112,8 +115,9 @@ def run_document(mig_id):
     api_name = new_dirs[0] if new_dirs else _guess_api(r, gen_root, before)
     gen_dir = f"{gen_root}/{api_name}" if api_name else None
 
+    _dets = {"ingest": "unpacked", "parse": "parsed source", "model": "API model built"}
     for stepk in ("ingest", "parse", "model"):
-        _update(mig_id, lambda m, s=stepk: M.set_step(m, "document", s, M.DONE))
+        _update(mig_id, lambda m, s=stepk: M.set_step(m, "document", s, M.DONE, _dets[s]))
 
     files = {"technical": "TECHNICAL.md", "mapping_doc": "MAPPING.md",
              "functional": "FUNCTIONAL.md", "estimate": "ESTIMATE.md"}
@@ -127,7 +131,7 @@ def run_document(mig_id):
     _update(mig_id, lambda m: M.set_step(m, "document", "portfolio",
                                          M.DONE if portfolio else M.SKIPPED))
 
-    layer, est = _read_meta(r, gen_dir)
+    layer, est = _read_meta(r, gen_dir, gen_root, api_name)
     def _meta(m):
         m["apiName"] = api_name
         m["layer"] = layer
@@ -158,7 +162,9 @@ def run_scaffold(mig_id):
                                M.set_step(m, "scaffold", "generate", M.RUNNING),
                                M.log(m, "factory scaffold: generating WSO2 service skeleton")))
 
-    res = r.run(f"python3 -m factory scaffold {_q(host_src)} --out {_q(services)}",
+    lessons_env = _apply_lessons(mig_id, r, mig.get("apiName"), mig.get("workspace"),
+                                 mig.get("technology"), f"{mig_id}:scaffold")
+    res = r.run(f"{lessons_env}python3 -m factory scaffold {_q(host_src)} --out {_q(services)}",
                 cwd=f"{PLATFORM_DIR}/migration-factory", timeout=900)
     if not res.ok:
         _update(mig_id, lambda m: (M.set_step(m, "scaffold", "generate", M.FAILED,
@@ -266,6 +272,34 @@ def run_deploy(mig_id):
 
 # ---------------------------------------------------------------- helpers
 
+def _apply_lessons(mig_id, r, api_name, workspace, technology, run_ref):
+    """Consolidate open reviewer lessons for this run, hand them to the build agent as a
+    knowledge file on the host, mark them applied, and record the count. Returns an env
+    prefix (e.g. 'MT_LESSONS_FILE=... ') to attach to the factory command."""
+    import os
+    import tempfile
+    lessons = kb.lessons_for(api_name, workspace, technology)
+    if not lessons:
+        return ""
+    md = kb.render_lessons(lessons)
+    tmp = tempfile.NamedTemporaryFile("w", suffix=".md", delete=False)
+    tmp.write(md)
+    tmp.close()
+    dest = f"{PLATFORM_DIR}/migration-factory/.mt-knowledge.md"
+    try:
+        r.put(tmp.name, dest)
+    finally:
+        os.unlink(tmp.name)
+    ids = [f["id"] for f in lessons]
+    kb.mark_applied(ids, run_ref)
+
+    def _mark(m):
+        m["lessonsApplied"] = m.get("lessonsApplied", 0) + len(ids)
+        M.log(m, f"applied {len(ids)} reviewer lesson(s) from the knowledge base to this run")
+    _update(mig_id, _mark)
+    return f"MT_LESSONS_FILE={_q(dest)} "
+
+
 def _q(s):
     import shlex
     return shlex.quote(s)
@@ -290,25 +324,30 @@ def _guess_api(r, gen_root, before):
     return extra[0] if extra else (now[-1] if now else None)
 
 
-def _read_meta(r, gen_dir):
-    if not gen_dir:
-        return None, None
-    inv = r.read(f"{gen_dir}/inventory.json", 8000)
+def _read_meta(r, gen_dir, gen_root, api_name):
+    """layer from inventory.json head; AI-assisted days from the PORTFOLIO row."""
+    import re
     layer = None
     est = None
-    try:
-        import json
-        data = json.loads(inv) if inv.strip() else {}
-        layer = data.get("layer")
-        est = (data.get("estimate") or {}).get("aiAssistedDays") or data.get("aiAssistedDays")
-    except Exception:
-        pass
-    if est is None:
-        txt = r.read(f"{gen_dir}/ESTIMATE.md", 4000)
-        import re
-        m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:AI[- ]assisted\s*)?days", txt)
+    if gen_dir:
+        head = r.read(f"{gen_dir}/inventory.json", 4000)
+        m = re.search(r'"layer"\s*:\s*"([^"]+)"', head)
         if m:
-            est = float(m.group(1))
+            layer = m.group(1)
+    port = r.read(f"{gen_root}/PORTFOLIO.md", 40000)
+    for line in port.splitlines():
+        line = line.strip()
+        if line.startswith("|") and api_name and api_name in line:
+            cols = [c.strip() for c in line.strip("|").split("|")]
+            # name | tech | layer | endpoints | flows | crit | high | manual | ai | basis
+            if len(cols) >= 3 and not layer:
+                layer = cols[2]
+            if len(cols) >= 9:
+                try:
+                    est = float(cols[8])
+                except ValueError:
+                    pass
+            break
     return layer, est
 
 
