@@ -371,7 +371,7 @@ async function loadApis() {
     migrations.forEach(m => {
       if (m.apiName && !seen.has(m.apiName)) {
         seen.add(m.apiName);
-        APIS.push({ apiName: m.apiName, layer: m.layer, outcome: m.progress.outcome });
+        APIS.push({ apiName: m.apiName, layer: m.layer, outcome: m.progress.outcome, id: m.id });
       }
     });
   } catch { APIS = []; }
@@ -380,18 +380,37 @@ async function loadApis() {
     `<option value="${esc(a.apiName)}">${esc(a.apiName)} · ${a.layer || "?"} · ${a.outcome}</option>`).join("")
     || '<option value="">no migrated APIs yet</option>';
 }
-function presetForApi(name) {
+// Known GraphQL-passthrough contracts (exact names). Everything else is driven by the API's
+// own generated endpoints (inventory.json), so each API shows its real operations.
+function knownPreset(name) {
   const n = (name || "").toLowerCase();
-  if (n.includes("reservation-mgr-exp"))
+  if (n === "reservation-mgr-exp-api")
     return { method: "POST", path: "/reservation-mgr-exp-api/v1/integration-tasks",
              headers: { "client_channel": "web", "Content-Type": "application/json" }, body: GQL };
-  if (n.includes("seaware-sys") || n.includes("sys-api"))
-    return { method: "POST", path: "/" + name + "/v1/integration-tasks",
+  if (n === "seaware-sys-api")
+    return { method: "POST", path: "/seaware-sys-api/v1/integration-tasks",
              headers: { "Content-Type": "application/json" }, body: GQL };
-  if (n.includes("seaware-cache-proc"))
+  if (n === "seaware-cache-proc-api")
     return { method: "POST", path: "/seaware-cache-proc-api/v1/cache",
              headers: { "operationName": "availableVoyages", "Content-Type": "application/json" }, body: GQL };
-  return { method: "GET", path: "/health/ready", headers: {}, body: "" };
+  return null;
+}
+async function loadOps() {
+  const a = APIS.find(x => x.apiName === $("#plSvc").value);
+  if (a && a.id && !a.endpoints) {
+    try {
+      const inv = await (await api(`/api/migrations/${a.id}/docs/inventory.json`)).json();
+      a.endpoints = (inv.endpoints || []).filter(e => e.method && e.method !== "ANY");
+    } catch { a.endpoints = []; }
+  }
+  const sel = $("#plOp");
+  if (sel) {
+    const known = knownPreset(a && a.apiName), eps = (a && a.endpoints) || [];
+    sel.innerHTML = eps.map((e, i) => `<option value="${i}">${e.method} ${esc(e.path)}</option>`).join("")
+      || '<option value="">health check (no operations generated)</option>';
+    sel.parentElement.style.display = known ? "none" : "";   // known APIs use their fixed contract
+  }
+  plFill();
 }
 const PRESETS = {
   exp:  { method:"POST", path:"/reservation-mgr-exp-api/v1/integration-tasks",
@@ -405,12 +424,21 @@ const PRESETS = {
     body:'{"query":"query AvailableVoyages { availableVoyages { pkg { key } } }"}' },
   zoho: { method:"GET", path:"/health/ready", headers:{}, body:"" },
 };
-function plFill(){ const p=presetForApi($("#plSvc").value);
+function plFill(){
+  const a=APIS.find(x=>x.apiName===$("#plSvc").value)||{};
+  let p=knownPreset(a.apiName);
+  if(!p){
+    const eps=a.endpoints||[]; const idx=parseInt(($("#plOp")&&$("#plOp").value)||"0",10)||0; const ep=eps[idx];
+    if(ep) p={method:ep.method, path:ep.path, headers:{"Content-Type":"application/json"}, body:ep.method==="GET"?"":"{\n  \n}"};
+    else p={method:"GET", path:"/health/ready", headers:{}, body:""};
+  }
   $("#plMethod").value=p.method; $("#plPath").value=p.path;
-  $("#plHeaders").value=JSON.stringify(p.headers,null,2); $("#plBody").value=p.body; $("#plResp").textContent="—"; }
-$("#playBtn").addEventListener("click",async()=>{await loadApis();await loadEnvs();$("#playModal").classList.remove("hidden");plFill();});
+  $("#plHeaders").value=JSON.stringify(p.headers,null,2); $("#plBody").value=p.body; $("#plResp").textContent="—";
+}
+$("#playBtn").addEventListener("click",async()=>{await loadApis();await loadEnvs();$("#playModal").classList.remove("hidden");await loadOps();});
 $("#playClose").addEventListener("click",()=>$("#playModal").classList.add("hidden"));
-$("#plSvc").addEventListener("change",plFill);
+$("#plSvc").addEventListener("change",loadOps);
+$("#plOp").addEventListener("change",plFill);
 $("#plAddEnv").addEventListener("click",()=>$("#plEnvForm").classList.toggle("hidden"));
 $("#envSave").addEventListener("click",async()=>{
   const name=$("#envName").value.trim(), baseUrl=$("#envUrl").value.trim(), token=$("#envToken").value.trim();
