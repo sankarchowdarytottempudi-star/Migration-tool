@@ -22,8 +22,16 @@ async function api(path, opts = {}) {
   const r = await fetch(path, {
     ...opts, headers: { "X-Admin-Token": TOKEN, ...(opts.headers || {}) },
   });
-  if (r.status === 401) { showLogin("Token rejected."); throw new Error("unauthorized"); }
+  // Never tear the whole app down to the login screen while a modal is open (that closed the
+  // Playground and reset the page on any transient 401). Only redirect to login otherwise.
+  if (r.status === 401) { if (!anyModalOpen()) showLogin("Session expired — sign in again."); throw new Error("unauthorized"); }
   return r;
+}
+function anyModalOpen() { return [...document.querySelectorAll(".modal")].some(m => !m.classList.contains("hidden")); }
+function openModal(sel) { $(sel).classList.remove("hidden"); if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+function closeModal(sel) {
+  $(sel).classList.add("hidden");
+  if (!anyModalOpen() && selected) { if (pollTimer) clearInterval(pollTimer); pollTimer = setInterval(refreshDetail, 1500); }
 }
 
 // ---------- auth ----------
@@ -280,7 +288,7 @@ window.run=run;window.advance=advance;window.delMig=delMig;window.dlDoc=dlDoc;wi
 
 // ---------- knowledge base modal ----------
 $("#kbBtn").addEventListener("click", async () => {
-  $("#kbModal").classList.remove("hidden");
+  openModal("#kbModal");
   const { feedback } = await (await api("/api/knowledge")).json();
   const grp = { functional: [], workspace: [], api: [] };
   feedback.forEach((f) => (grp[f.scope] || grp.api).push(f));
@@ -292,7 +300,7 @@ $("#kbBtn").addEventListener("click", async () => {
     sec("Workspace lessons (private)", grp.workspace, "Only applied within the originating workspace.") +
     sec("API lessons (private)", grp.api, "Only applied to the same API.");
 });
-$("#kbClose").addEventListener("click", () => $("#kbModal").classList.add("hidden"));
+$("#kbClose").addEventListener("click", () => closeModal("#kbModal"));
 
 // ---------- workspaces & target servers ----------
 const WS_TIERS = [["dev","Dev"],["qa","QA"],["uat","UAT"],["prod","Prod (optional)"]];
@@ -308,9 +316,9 @@ function wsServersHTML(){
 }
 $("#wsBtn").addEventListener("click",async()=>{
   $("#wsServers").innerHTML=wsServersHTML(); $("#wsError").textContent=""; $("#wsName").value="";
-  $("#wsModal").classList.remove("hidden"); loadWsConfigs();
+  openModal("#wsModal"); loadWsConfigs();
 });
-$("#wsClose").addEventListener("click",()=>$("#wsModal").classList.add("hidden"));
+$("#wsClose").addEventListener("click",()=>closeModal("#wsModal"));
 $("#wsSave").addEventListener("click",async()=>{
   const servers={};
   WS_TIERS.forEach(([k])=>{
@@ -343,8 +351,8 @@ async function delWs(id){ if(!confirm("Delete this workspace config?"))return;
 window.delWs=delWs;
 
 // ---------- new migration ----------
-$("#newBtn").addEventListener("click", () => $("#modal").classList.remove("hidden"));
-$("#cancelNew").addEventListener("click", () => $("#modal").classList.add("hidden"));
+$("#newBtn").addEventListener("click", () => openModal("#modal"));
+$("#cancelNew").addEventListener("click", () => closeModal("#modal"));
 $("#newForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = $("#mName").value.trim(), ws = $("#mWorkspace").value.trim(), file = $("#mFile").files[0];
@@ -353,7 +361,7 @@ $("#newForm").addEventListener("submit", async (e) => {
   if ($("#mTarget")) hdrs["X-Target-Tech"] = $("#mTarget").value;
   if ($("#mSpec") && $("#mSpec").checked) hdrs["X-Source-Type"] = "spec";
   const r = await api("/api/migrations", { method: "POST", headers: hdrs, body: file });
-  if (r.ok) { const m = await r.json(); $("#modal").classList.add("hidden");
+  if (r.ok) { const m = await r.json(); closeModal("#modal");
     $("#mName").value = ""; $("#mFile").value = ""; await loadList(); select(m.id); }
   else $("#newError").textContent = "Upload failed.";
 });
@@ -406,7 +414,7 @@ async function loadOps() {
   const sel = $("#plOp");
   if (sel) {
     const known = knownPreset(a && a.apiName), eps = (a && a.endpoints) || [];
-    sel.innerHTML = eps.map((e, i) => `<option value="${i}">${e.method} ${esc(e.path)}</option>`).join("")
+    sel.innerHTML = eps.map((e, i) => `<option value="${i}">${e.method} ${esc((e.path||"").replace(/\$\{app\.name\}/g, a.apiName))}</option>`).join("")
       || '<option value="">health check (no operations generated)</option>';
     sel.parentElement.style.display = known ? "none" : "";   // known APIs use their fixed contract
   }
@@ -429,14 +437,14 @@ function plFill(){
   let p=knownPreset(a.apiName);
   if(!p){
     const eps=a.endpoints||[]; const idx=parseInt(($("#plOp")&&$("#plOp").value)||"0",10)||0; const ep=eps[idx];
-    if(ep) p={method:ep.method, path:ep.path, headers:{"Content-Type":"application/json"}, body:ep.method==="GET"?"":"{\n  \n}"};
+    if(ep) p={method:ep.method, path:(ep.path||"").replace(/\$\{app\.name\}/g, a.apiName), headers:{"Content-Type":"application/json"}, body:ep.method==="GET"?"":"{\n  \n}"};
     else p={method:"GET", path:"/health/ready", headers:{}, body:""};
   }
   $("#plMethod").value=p.method; $("#plPath").value=p.path;
   $("#plHeaders").value=JSON.stringify(p.headers,null,2); $("#plBody").value=p.body; $("#plResp").textContent="—";
 }
-$("#playBtn").addEventListener("click",async()=>{await loadApis();await loadEnvs();$("#playModal").classList.remove("hidden");await loadOps();});
-$("#playClose").addEventListener("click",()=>$("#playModal").classList.add("hidden"));
+$("#playBtn").addEventListener("click",async()=>{await loadApis();await loadEnvs();openModal("#playModal");await loadOps();});
+$("#playClose").addEventListener("click",()=>closeModal("#playModal"));
 $("#plSvc").addEventListener("change",loadOps);
 $("#plOp").addEventListener("change",plFill);
 $("#plAddEnv").addEventListener("click",()=>$("#plEnvForm").classList.toggle("hidden"));
