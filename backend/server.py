@@ -9,6 +9,7 @@ from __future__ import annotations
 import hmac
 import json
 import os
+import re
 import secrets
 import urllib.error
 import urllib.request
@@ -359,7 +360,11 @@ class Handler(BaseHTTPRequestHandler):
             if env.get("token") and not any(k.lower() == "authorization" for k in headers):
                 headers["Authorization"] = "Bearer " + env["token"]
             return env["baseUrl"], headers
-        base = PROXY_TARGETS.get(payload.get("service"))
+        svc = payload.get("service") or ""
+        base = PROXY_TARGETS.get(svc)
+        # any migrated API: resolve <api-name> to its in-cluster service (wso2 namespace)
+        if not base and re.match(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$", svc):
+            base = f"http://{svc}.wso2.svc"
         # inject the downstream bearer server-side when the caller sent none
         if base and not any(k.lower() == "authorization" for k in headers):
             headers["Authorization"] = f"Bearer {DEFAULT_BEARER}"

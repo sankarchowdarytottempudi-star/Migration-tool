@@ -361,6 +361,38 @@ $("#newForm").addEventListener("submit", async (e) => {
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 
 // ---------- API playground ----------
+const GQL = '{"query":"query AvailableVoyages { availableVoyages { pkg { key } } }"}';
+let APIS = [];   // migrated APIs, from /api/migrations
+
+async function loadApis() {
+  try {
+    const { migrations } = await (await api("/api/migrations")).json();
+    const seen = new Set(); APIS = [];
+    migrations.forEach(m => {
+      if (m.apiName && !seen.has(m.apiName)) {
+        seen.add(m.apiName);
+        APIS.push({ apiName: m.apiName, layer: m.layer, outcome: m.progress.outcome });
+      }
+    });
+  } catch { APIS = []; }
+  const el = $("#plSvc");
+  if (el) el.innerHTML = APIS.map(a =>
+    `<option value="${esc(a.apiName)}">${esc(a.apiName)} · ${a.layer || "?"} · ${a.outcome}</option>`).join("")
+    || '<option value="">no migrated APIs yet</option>';
+}
+function presetForApi(name) {
+  const n = (name || "").toLowerCase();
+  if (n.includes("reservation-mgr-exp"))
+    return { method: "POST", path: "/reservation-mgr-exp-api/v1/integration-tasks",
+             headers: { "client_channel": "web", "Content-Type": "application/json" }, body: GQL };
+  if (n.includes("seaware-sys") || n.includes("sys-api"))
+    return { method: "POST", path: "/" + name + "/v1/integration-tasks",
+             headers: { "Content-Type": "application/json" }, body: GQL };
+  if (n.includes("seaware-cache-proc"))
+    return { method: "POST", path: "/seaware-cache-proc-api/v1/cache",
+             headers: { "operationName": "availableVoyages", "Content-Type": "application/json" }, body: GQL };
+  return { method: "GET", path: "/health/ready", headers: {}, body: "" };
+}
 const PRESETS = {
   exp:  { method:"POST", path:"/reservation-mgr-exp-api/v1/integration-tasks",
     headers:{Authorization:"Bearer e2e-secret-token-123","client_channel":"web","Content-Type":"application/json"},
@@ -373,10 +405,10 @@ const PRESETS = {
     body:'{"query":"query AvailableVoyages { availableVoyages { pkg { key } } }"}' },
   zoho: { method:"GET", path:"/health/ready", headers:{}, body:"" },
 };
-function plFill(){ const p=PRESETS[$("#plSvc").value];
+function plFill(){ const p=presetForApi($("#plSvc").value);
   $("#plMethod").value=p.method; $("#plPath").value=p.path;
   $("#plHeaders").value=JSON.stringify(p.headers,null,2); $("#plBody").value=p.body; $("#plResp").textContent="—"; }
-$("#playBtn").addEventListener("click",async()=>{await loadEnvs();$("#playModal").classList.remove("hidden");plFill();});
+$("#playBtn").addEventListener("click",async()=>{await loadApis();await loadEnvs();$("#playModal").classList.remove("hidden");plFill();});
 $("#playClose").addEventListener("click",()=>$("#playModal").classList.add("hidden"));
 $("#plSvc").addEventListener("change",plFill);
 $("#plAddEnv").addEventListener("click",()=>$("#plEnvForm").classList.toggle("hidden"));
