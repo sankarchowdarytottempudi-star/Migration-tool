@@ -132,3 +132,5 @@ select{width:100%;padding:9px;border-radius:8px;border:1px solid var(--line);bac
 .fb-status{font-size:11px;color:var(--muted)}
 .fb-status.applied{color:var(--ok)}
 .fb-sum{font-weight:600} .fb ul{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:13px}
+.testurl{background:#0d2a16;border:1px solid #238636;border-radius:10px;padding:10px 14px;margin:12px 0;font-size:13px}
+.testurl a{color:#7ee787}

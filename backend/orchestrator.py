@@ -202,11 +202,13 @@ def run_test(mig_id):
                                    M.log(m, "test skipped: no service directory yet", "warn")))
         return
     pkg = f"{PLATFORM_DIR}/{svc}"
+    _ensure_in_workspace(r, mig.get("apiName"))
 
     _update(mig_id, lambda m: (M.set_phase(m, "test", M.RUNNING),
                                M.set_step(m, "test", "build", M.RUNNING),
-                               M.log(m, f"bal build {svc}")))
-    b = r.run("bal build", cwd=pkg, timeout=1200)
+                               M.log(m, f"bal build (workspace) for {svc}")))
+    # Build the whole workspace so the sibling `integration_commons` resolves.
+    b = r.run("bal build", cwd=PLATFORM_DIR, timeout=1800)
     _update(mig_id, lambda m: M.set_step(m, "test", "build",
                                          M.DONE if b.ok else M.FAILED,
                                          "compiled" if b.ok else (b.err or b.out)[-300:]))
@@ -243,23 +245,34 @@ def run_deploy(mig_id):
     r = get_runner()
     mig = store.get(mig_id)
     api = mig.get("apiName") or ""
-    values = f"{PLATFORM_DIR}/deploy/values/{api}"
-    if not api or not r.exists(values):
+    svc = mig.get("serviceDir")
+    if not api or not svc:
         _update(mig_id, lambda m: (M.set_phase(m, "deploy", M.ACTION),
-                                   M.set_step(m, "deploy", "image", M.ACTION,
-                                              f"add deploy/values/{api or '<api>'} and VM values first"),
-                                   M.log(m, "deploy needs Helm values for this API; "
-                                            "use the existing services as the template", "warn")))
+                                   M.set_step(m, "deploy", "image", M.ACTION, "scaffold a service first")))
         return
-    # A ready service: build image, import to k3s, helm deploy, verify.
+
+    _ensure_in_workspace(r, api)
+    layer = mig.get("layer") or "system"
+    base_path = _ensure_deploy_assets(r, api, layer)   # generate values/config if missing
     jar = api.replace("-", "_")
+    jar_path = f"services/{api}/target/bin/{jar}.jar"
+
+    _update(mig_id, lambda m: M.set_phase(m, "deploy", M.RUNNING))
+    if not r.exists(f"{PLATFORM_DIR}/{jar_path}"):
+        r.run("bal build", cwd=PLATFORM_DIR, timeout=1800)
+
+    secret_cmd = (f"kubectl -n wso2 create secret generic {api}-config "
+                  f"--from-file=Config.toml=deploy/vm/config/{api}.toml --dry-run=client -o yaml "
+                  f"| kubectl apply -f -")
     steps = [
-        ("image", f"docker build -q -f deploy/docker/Dockerfile --build-arg JAR=services/{api}/target/bin/{jar}.jar --build-arg PORT=8081 -t {api}:vm ."),
+        ("image", f"docker build -q -f deploy/docker/Dockerfile --build-arg JAR={jar_path} "
+                  f"--build-arg PORT=8081 -t {api}:vm ."),
         ("import", f"docker save {api}:vm | k3s ctr images import -"),
-        ("helm", f"helm upgrade --install {api} deploy/helm/wso2-api -n wso2 --atomic --timeout 5m -f deploy/values/{api}/common.yaml -f deploy/vm/values/{api}.yaml"),
+        ("helm", secret_cmd + f" && helm upgrade --install {api} deploy/helm/wso2-api -n wso2 "
+                 f"--atomic --timeout 5m -f deploy/values/{api}/common.yaml -f deploy/vm/values/{api}.yaml "
+                 f"--set configChecksum=\"$(sha256sum deploy/vm/config/{api}.toml | cut -c1-16)\""),
         ("verify", f"kubectl -n wso2 rollout status deployment/{api} --timeout=150s"),
     ]
-    _update(mig_id, lambda m: M.set_phase(m, "deploy", M.RUNNING))
     for sk, cmd in steps:
         _update(mig_id, lambda m, s=sk: M.set_step(m, "deploy", s, M.RUNNING))
         res = r.run(cmd, cwd=PLATFORM_DIR, timeout=1200)
@@ -269,8 +282,66 @@ def run_deploy(mig_id):
         if not res.ok:
             return
 
+    np = r.run(f"kubectl -n wso2 get svc {api} "
+               f"-o jsonpath='{{.spec.ports[0].nodePort}}'").out.strip()
+    def _url(m):
+        m["testNodePort"] = np
+        m["testBasePath"] = base_path
+        M.log(m, f"deployed {api}; test via NodePort {np}")
+    _update(mig_id, _url)
+
 
 # ---------------------------------------------------------------- helpers
+
+def _ensure_in_workspace(r, api):
+    """Add services/<api> to the platform workspace Ballerina.toml so the build resolves the
+    sibling integration_commons package (the scaffolder does not register it)."""
+    if not api:
+        return
+    entry = f"services/{api}"
+    toml = f"{PLATFORM_DIR}/Ballerina.toml"
+    code = (f"p='{toml}';s=open(p).read();t='{entry}';"
+            "m='packages = ['+chr(10);"
+            "s=(s if t in s else s.replace(m, m+'    \"'+t+'\",'+chr(10),1));"
+            "open(p,'w').write(s)")
+    r.run("python3 -c " + _q(code))
+
+
+def _ensure_deploy_assets(r, api, layer):
+    """Generate Helm values + Config.toml for a new API if they do not exist yet.
+    Returns the API base path. NodePort is derived deterministically in 30100-30189."""
+    import os
+    import tempfile
+    pkg = api.replace("-", "_")
+    base_path = f"/{api}/v1"
+    port = 30100 + (sum(bytearray(api.encode())) % 90)
+    common = (f"name: {api}\nlayer: {layer}\nimage:\n  repository: REGISTRY/{api}\nport: 8081\n"
+              "networkPolicy:\n  allowFromLayers: [process, experience]\n"
+              "  allowFromNamespaces: [observability]\n"
+              "resources:\n  requests: { cpu: 250m, memory: 384Mi }\n"
+              "  limits: { cpu: \"1\", memory: 768Mi }\n")
+    vm = (f"image: {{ repository: {api}, tag: vm, pullPolicy: Never }}\nimagePullSecrets: []\n"
+          f"service: {{ type: NodePort, nodePort: {port} }}\nautoscaling: {{ enabled: false }}\n"
+          "replicas: 1\nserviceMonitor: { enabled: false }\nnetworkPolicy: { enabled: false }\n"
+          "ingress: { enabled: false }\nresources:\n  requests: { cpu: 100m, memory: 384Mi }\n"
+          "  limits: { cpu: \"1\", memory: 768Mi }\n")
+    conf = f"[aroya.{pkg}]\nenv = \"vm\"\nhttpPort = 8081\nbasePath = \"{base_path}\"\n"
+    want = {
+        f"deploy/values/{api}/common.yaml": common,
+        f"deploy/vm/values/{api}.yaml": vm,
+        f"deploy/vm/config/{api}.toml": conf,
+    }
+    for rel, content in want.items():
+        dest = f"{PLATFORM_DIR}/{rel}"
+        if r.exists(dest):
+            continue
+        t = tempfile.NamedTemporaryFile("w", delete=False)
+        t.write(content)
+        t.close()
+        r.put(t.name, dest)
+        os.unlink(t.name)
+    return base_path
+
 
 def _apply_lessons(mig_id, r, api_name, workspace, technology, run_ref):
     """Consolidate open reviewer lessons for this run, hand them to the build agent as a

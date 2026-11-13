@@ -106,6 +106,10 @@ function renderDetail(m) {
       <button class="ghost" onclick="delMig('${m.id}')">Delete</button>
     </div>
 
+    ${m.testNodePort ? `<div class="testurl">✓ Live test endpoint:
+      <a href="http://${location.hostname}:${m.testNodePort}/health/ready" target="_blank">http://${location.hostname}:${m.testNodePort}/health/ready</a>
+      <span class="muted">· base path ${esc(m.testBasePath || "")}</span></div>` : ""}
+
     ${docs.length ? `<div class="section"><h3>Documents</h3><div class="docs">
       ${docs.map((d) => `<button class="doc" onclick="dlDoc('${m.id}','${d.name}')">⬇ ${d.name}</button>`).join("")}
     </div></div>` : ""}
