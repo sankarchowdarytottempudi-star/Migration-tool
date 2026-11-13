@@ -45,6 +45,16 @@
     <input id="mWorkspace" value="Cruise Saudi Workspace">
     <label>Name</label>
     <input id="mName" placeholder="e.g. Loyalty Experience API">
+    <label>Target technology</label>
+    <select id="mTarget">
+      <option value="wso2">WSO2 Integrator (Ballerina) on Kubernetes</option>
+      <option value="mule">MuleSoft Mule 4</option>
+      <option value="springboot">Java Spring Boot</option>
+      <option value="dotnet">.NET (ASP.NET Core)</option>
+      <option value="webmethods">Software AG webMethods</option>
+      <option value="boomi">Boomi</option>
+      <option value="openapi">OpenAPI contract + stub</option>
+    </select>
     <label>Source export (.zip / .jar / code) — or a Functionality/Mapping spec (.json)</label>
     <input id="mFile" type="file">
     <label class="chk"><input id="mSpec" type="checkbox"> This is a Functionality/Mapping spec only (no source code)</label>

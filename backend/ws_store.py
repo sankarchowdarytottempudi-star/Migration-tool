@@ -91,6 +91,19 @@ def get(ws_id: str):
     return None
 
 
+def set_provisioned(ws_id: str, tier: str, value: bool, note: str = ""):
+    with _LOCK:
+        d = _load()
+        for w in d["workspaces"]:
+            if w["id"] == ws_id and tier in (w.get("servers") or {}):
+                w["servers"][tier]["provisioned"] = value
+                if note:
+                    w["servers"][tier]["provisionNote"] = note
+                _save(d)
+                return True
+    return False
+
+
 def delete(ws_id: str) -> bool:
     with _LOCK:
         d = _load()

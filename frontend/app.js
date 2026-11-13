@@ -328,9 +328,16 @@ async function loadWsConfigs(){
   const d=await (await api("/api/workspace-configs")).json();
   $("#wsList").innerHTML=(d.workspaces||[]).map(w=>`<div class="wsitem">
     <div class="row-between"><b>${esc(w.name)}</b><button class="ghost" onclick="delWs('${w.id}')">Delete</button></div>
-    <div class="muted sm">${Object.entries(w.servers).map(([t,s])=>`${t.toUpperCase()}: ${esc(s.username)}@${esc(s.host)}:${s.port}${s.provisioned?" ✓":""}`).join(" · ")||"no servers"}</div>
+    ${Object.entries(w.servers).map(([t,s])=>`<div class="srvrow">
+      <span class="muted sm">${t.toUpperCase()}: ${esc(s.username)}@${esc(s.host)}:${s.port} ${s.provisioned?"✓ provisioned":""}</span>
+      <button class="ghost" onclick="provisionSrv('${w.id}','${t}')">Provision</button></div>`).join("")||'<div class="muted sm">no servers</div>'}
   </div>`).join("")||'<div class="muted">None yet.</div>';
 }
+async function provisionSrv(id,tier){
+  const d=await (await api(`/api/workspace-configs/${id}/provision/${tier}`,{method:"POST"})).json();
+  $("#wsError").textContent=(d.note||d.error||"")+" — preflight started; see Activity/logs. Full install needs ?confirm=true.";
+}
+window.provisionSrv=provisionSrv;
 async function delWs(id){ if(!confirm("Delete this workspace config?"))return;
   await api(`/api/workspace-configs/${id}`,{method:"DELETE"}); loadWsConfigs(); }
 window.delWs=delWs;
@@ -343,6 +350,7 @@ $("#newForm").addEventListener("submit", async (e) => {
   const name = $("#mName").value.trim(), ws = $("#mWorkspace").value.trim(), file = $("#mFile").files[0];
   if (!name || !file) { $("#newError").textContent = "Name and file required."; return; }
   const hdrs = { "X-Name": name, "X-Filename": file.name, "X-Workspace": ws };
+  if ($("#mTarget")) hdrs["X-Target-Tech"] = $("#mTarget").value;
   if ($("#mSpec") && $("#mSpec").checked) hdrs["X-Source-Type"] = "spec";
   const r = await api("/api/migrations", { method: "POST", headers: hdrs, body: file });
   if (r.ok) { const m = await r.json(); $("#modal").classList.add("hidden");

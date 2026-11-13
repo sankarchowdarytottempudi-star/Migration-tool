@@ -94,7 +94,8 @@ def run_spec(mig_id):
     services = f"{PLATFORM_DIR}/services"
     gen = f"{PLATFORM_DIR}/docs/generated"
     before = set(r.listdir(services))
-    res = r.run(f"python3 -m factory genspec {_q(host_src)} --out {_q(services)} --docs {_q(gen)}",
+    target = mig.get("targetTech") or "wso2"
+    res = r.run(f"python3 -m factory genspec {_q(host_src)} --out {_q(services)} --docs {_q(gen)} --target {_q(target)}",
                 cwd=f"{PLATFORM_DIR}/migration-factory", timeout=600)
     if not res.ok:
         _update(mig_id, lambda m: (M.set_step(m, "document", "ingest", M.FAILED, (res.err or res.out)[-300:]),
@@ -219,7 +220,8 @@ def run_scaffold(mig_id):
 
     lessons_env = _apply_lessons(mig_id, r, mig.get("apiName"), mig.get("workspace"),
                                  mig.get("technology"), f"{mig_id}:scaffold")
-    res = r.run(f"{lessons_env}python3 -m factory scaffold {_q(host_src)} --out {_q(services)}",
+    target = mig.get("targetTech") or "wso2"
+    res = r.run(f"{lessons_env}python3 -m factory scaffold {_q(host_src)} --out {_q(services)} --target {_q(target)}",
                 cwd=f"{PLATFORM_DIR}/migration-factory", timeout=900)
     if not res.ok:
         _update(mig_id, lambda m: (M.set_step(m, "scaffold", "generate", M.FAILED,

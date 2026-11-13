@@ -23,13 +23,16 @@ PROXY_TARGETS = {
     "zoho": "http://zoho-sys-api.wso2.svc",
 }
 
+# The downstream bearer is injected server-side so the browser never holds a token.
+DEFAULT_BEARER = os.environ.get("MT_DEFAULT_BEARER", "e2e-secret-token-123")
+
 # Representative request per service, used for latency measurement in the optimizer.
 _GQL = '{"query":"query AvailableVoyages { availableVoyages { pkg { key } } }"}'
 SVC_PRESETS = {
     "exp": ("POST", "/reservation-mgr-exp-api/v1/integration-tasks",
-            {"Authorization": "Bearer e2e-secret-token-123", "client_channel": "web", "Content-Type": "application/json"}, _GQL),
+            {"Authorization": f"Bearer {DEFAULT_BEARER}", "client_channel": "web", "Content-Type": "application/json"}, _GQL),
     "sys": ("POST", "/seaware-sys-api/v1/integration-tasks",
-            {"Authorization": "Bearer e2e-secret-token-123", "Content-Type": "application/json"}, _GQL),
+            {"Authorization": f"Bearer {DEFAULT_BEARER}", "Content-Type": "application/json"}, _GQL),
     "proc": ("POST", "/seaware-cache-proc-api/v1/cache",
              {"operationName": "availableVoyages", "Content-Type": "application/json"}, _GQL),
     "zoho": ("GET", "/health/ready", {}, ""),
@@ -302,7 +305,28 @@ class Handler(BaseHTTPRequestHandler):
                 return self._parity(mid)
             if parts[4] == "optimize":
                 return self._optimize(mid)
+        if len(parts) >= 6 and parts[2] == "workspace-configs" and parts[4] == "provision":
+            return self._provision(parts[3], parts[5])
         return self._json(404, {"error": "not found"})
+
+    def _provision(self, ws_id, tier):
+        import threading as _th
+        import provisioner
+        from urllib.parse import parse_qs, urlparse
+        ws = ws_store.get(ws_id)
+        if not ws:
+            return self._json(404, {"error": "workspace not found"})
+        server = (ws.get("servers") or {}).get(tier)
+        if not server:
+            return self._json(400, {"error": f"no {tier} server on this workspace"})
+        confirm = parse_qs(urlparse(self.path).query).get("confirm", ["0"])[0] in ("1", "true", "yes")
+
+        def _run():
+            started, msg = provisioner.provision(server, confirm=confirm)
+            ws_store.set_provisioned(ws_id, tier, started and msg == "provisioned", msg)
+        _th.Thread(target=_run, daemon=True).start()
+        return self._json(202, {"started": True, "confirm": confirm, "plan": provisioner.plan(server),
+                                "note": "preflight runs first; full install only with ?confirm=true (destructive)"})
 
     def _create_env(self):
         try:
@@ -336,6 +360,9 @@ class Handler(BaseHTTPRequestHandler):
                 headers["Authorization"] = "Bearer " + env["token"]
             return env["baseUrl"], headers
         base = PROXY_TARGETS.get(payload.get("service"))
+        # inject the downstream bearer server-side when the caller sent none
+        if base and not any(k.lower() == "authorization" for k in headers):
+            headers["Authorization"] = f"Bearer {DEFAULT_BEARER}"
         return base, headers
 
     def _proxy(self):
@@ -504,6 +531,7 @@ class Handler(BaseHTTPRequestHandler):
         mig = M.new_migration(name, dest, workspace=workspace)
         if (self.headers.get("X-Source-Type") or "").lower() == "spec":
             mig["sourceType"] = "spec"
+        mig["targetTech"] = (self.headers.get("X-Target-Tech") or "wso2").lower()
         store.save(mig)
         return self._json(201, M.summarize(mig))
 
