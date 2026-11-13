@@ -401,6 +401,9 @@ function knownPreset(name) {
   if (n === "seaware-cache-proc-api")
     return { method: "POST", path: "/seaware-cache-proc-api/v1/cache",
              headers: { "operationName": "availableVoyages", "Content-Type": "application/json" }, body: GQL };
+  if (n === "reservation-common-proc-api")
+    return { method: "POST", path: "/reservation-common-proc-api/v1/integration-tasks",
+             headers: { "Content-Type": "application/json" }, body: GQL };
   return null;
 }
 async function loadOps() {
