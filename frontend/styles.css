@@ -144,3 +144,5 @@ select{width:100%;padding:9px;border-radius:8px;border:1px solid var(--line);bac
 .envform input{margin:0}
 .verified{background:#0d2a16;border:1px solid #238636;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:13px;color:#7ee787}
 .oc-verified{color:#7ee787;border-color:#2ea043;background:#0d2a16}
+.disc{margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.disc .sm{width:100%}

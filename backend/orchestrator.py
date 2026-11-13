@@ -145,6 +145,8 @@ def run_document(mig_id):
         M.set_step(m, "mapping", "decisions", M.ACTION, "resolve open questions from the mapping doc")
     _update(mig_id, _meta)
 
+    _discover_envs(mig_id, r, host_src)
+
 
 # ---------------------------------------------------------------- Scaffold
 
@@ -292,6 +294,27 @@ def run_deploy(mig_id):
 
 
 # ---------------------------------------------------------------- helpers
+
+def _discover_envs(mig_id, r, host_src):
+    """Extract per-environment endpoints from the uploaded source so the customer does not
+    re-enter them; store as suggestions on the migration."""
+    import json
+    import os
+    script = os.path.join(os.path.dirname(__file__), "discover_envs.py")
+    dest = f"{PLATFORM_DIR}/.mt-discover.py"
+    try:
+        r.put(script, dest)
+        res = r.run(f"python3 -I {_q(dest)} {_q(host_src)}", timeout=120)
+        data = json.loads((res.out or "").strip() or "{}")
+    except Exception:
+        data = {}
+    norm = {"development": "dev", "production": "prod", "staging": "stage"}
+    envs = [{"name": norm.get(k, k), "candidates": v} for k, v in data.items() if v]
+    if envs:
+        _update(mig_id, lambda m: (m.__setitem__("discoveredEnvs", envs),
+                                   M.log(m, "discovered environments from the source: "
+                                            + ", ".join(e["name"] for e in envs))))
+
 
 def _ensure_in_workspace(r, api):
     """Add services/<api> to the platform workspace Ballerina.toml so the build resolves the

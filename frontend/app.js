@@ -138,6 +138,11 @@ function renderDetail(m) {
         <button class="primary" onclick="verifyMig('${m.id}')">Fetch env data &amp; complete</button>
       </div>
       <pre id="vfResp" class="resp">${esc(vfState[m.id] ? vfState[m.id].resp : "—")}</pre>
+      ${(m.discoveredEnvs && m.discoveredEnvs.length) ? `<div class="disc">
+        <div class="muted sm">Discovered from the uploaded source — click to register (no re-entry):</div>
+        ${m.discoveredEnvs.map(e => e.candidates.map(c =>
+          `<button class="doc" onclick="regEnv('${m.id}','${esc(e.name)}','${esc(c)}')">${esc(e.name)}: ${esc(c)}</button>`).join("")).join("")}
+      </div>` : ""}
     </div>
 
     <div class="section"><h3>Reviewer feedback</h3>
@@ -228,9 +233,17 @@ async function verifyMig(id){
     body:JSON.stringify({envId,method:pr.method,path:pr.path,headers,body:pr.body})});
   const d=await r.json();
   let pretty=d.body; try{pretty=JSON.stringify(JSON.parse(d.body),null,2);}catch{}
-  vfState[id]={resp:(d.ok?"✓ VERIFIED — HTTP ":"✗ not verified — HTTP ")+d.status+"\n\n"+pretty,envId};
+  const perf=" · "+d.ms+" ms ("+d.slo+")"+(d.slo==="slow"?" — exceeds 1s target, needs optimization":"");
+  vfState[id]={resp:(d.ok?"✓ VERIFIED — HTTP ":"✗ not verified — HTTP ")+d.status+perf+"\n\n"+pretty,envId};
   await loadList(); refreshDetail();
 }
+async function regEnv(id,name,cand){
+  const baseUrl=/^https?:\/\//.test(cand)?cand:("https://"+cand);
+  await api("/api/environments",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({name,baseUrl})});
+  await loadEnvs(); refreshDetail();
+}
+window.regEnv=regEnv;
 window.run=run;window.advance=advance;window.delMig=delMig;window.dlDoc=dlDoc;window.submitFeedback=submitFeedback;window.verifyMig=verifyMig;
 
 // ---------- knowledge base modal ----------
@@ -302,7 +315,7 @@ $("#plSend").addEventListener("click",async()=>{
       path:$("#plPath").value,headers,body:$("#plBody").value})});
   const d=await r.json();
   let pretty=d.body; try{pretty=JSON.stringify(JSON.parse(d.body),null,2);}catch{}
-  $("#plResp").textContent="HTTP "+d.status+"\n\n"+pretty;
+  $("#plResp").textContent="HTTP "+d.status+"  ·  "+d.ms+" ms ("+d.slo+", target ≤250ms / max 1000ms)\n\n"+pretty;
 });
 
 // ---------- boot ----------

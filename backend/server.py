@@ -33,18 +33,35 @@ from runner import get_runner, PLATFORM_DIR
 
 
 def _http_call(base, path, method, headers, body, timeout=20):
+    """Returns (status, text, ms). ms is the measured round-trip latency."""
+    import time as _t
     if not path.startswith("/"):
         path = "/" + path
     data = body.encode() if isinstance(body, str) and body else None
     req = urllib.request.Request(base + path, data=data,
                                  method=(method or "POST").upper(), headers=headers or {})
+    t0 = _t.time()
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, r.read().decode(errors="replace")
+            out = (r.status, r.read().decode(errors="replace"))
     except urllib.error.HTTPError as e:
-        return e.code, e.read().decode(errors="replace")
+        out = (e.code, e.read().decode(errors="replace"))
     except Exception as e:
-        return 0, f"connection error: {e}"
+        out = (0, f"connection error: {e}")
+    return out[0], out[1], round((_t.time() - t0) * 1000)
+
+
+# Response-time targets (ms): at or under FAST is ideal; over MAX is too slow.
+SLO_FAST_MS = 250
+SLO_MAX_MS = 1000
+
+
+def _slo(ms):
+    if ms <= SLO_FAST_MS:
+        return "fast"
+    if ms <= SLO_MAX_MS:
+        return "ok"
+    return "slow"
 
 _DOC_NAMES = {"TECHNICAL.md", "MAPPING.md", "FUNCTIONAL.md", "ESTIMATE.md", "inventory.json"}
 
@@ -258,9 +275,9 @@ class Handler(BaseHTTPRequestHandler):
         base, headers = self._resolve_target(payload)
         if not base:
             return self._json(400, {"error": "unknown service or environment"})
-        status, text = _http_call(base, payload.get("path", "/"), payload.get("method"),
-                                   headers, payload.get("body"))
-        return self._json(200, {"status": status, "body": text})
+        status, text, ms = _http_call(base, payload.get("path", "/"), payload.get("method"),
+                                       headers, payload.get("body"))
+        return self._json(200, {"status": status, "body": text, "ms": ms, "slo": _slo(ms)})
 
     def _verify(self, mid):
         """Fetch data from the chosen environment; mark the migration verified only on success."""
@@ -272,21 +289,25 @@ class Handler(BaseHTTPRequestHandler):
         if not env:
             return self._json(400, {"error": "unknown environment"})
         base, headers = self._resolve_target(payload)
-        status, text = _http_call(base, payload.get("path", "/"), payload.get("method"),
-                                   headers, payload.get("body"))
+        status, text, ms = _http_call(base, payload.get("path", "/"), payload.get("method"),
+                                       headers, payload.get("body"))
         ok = status == 200 and len(text.strip()) > 0
+        slo = _slo(ms)
         with store.lock():
             m = store.get(mid)
             if ok:
                 m["verifiedEnv"] = env["name"]
                 m["verifiedAt"] = M._now()
                 m["verifySample"] = text[:2000]
-                M.log(m, f"verified against environment '{env['name']}' (HTTP {status}); "
+                m["verifyMs"] = ms
+                M.log(m, f"verified against '{env['name']}' (HTTP {status}, {ms} ms, {slo}); "
                          f"migration complete")
+                if slo == "slow":
+                    M.log(m, f"response {ms} ms exceeds the 1000 ms target — optimization needed", "warn")
             else:
                 M.log(m, f"verification against '{env['name']}' failed (HTTP {status})", "error")
             store.save(m)
-        return self._json(200, {"ok": ok, "status": status, "body": text})
+        return self._json(200, {"ok": ok, "status": status, "body": text, "ms": ms, "slo": slo})
 
     def _feedback(self, mid):
         try:
