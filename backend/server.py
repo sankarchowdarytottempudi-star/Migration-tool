@@ -481,9 +481,13 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             return self._json(400, {"error": "bad json"})
         mig = store.get(mid)
-        tech = mig.get("technology")
-        if tech in (None, "", "unknown"):
-            tech = None   # tech-agnostic functional lesson: applies to any migration
+        if "technology" in payload:
+            t = payload.get("technology")
+            tech = None if (not t or t == "all") else t   # explicit; "all"/empty = every technology
+        else:
+            tech = mig.get("technology")
+            if tech in (None, "", "unknown"):
+                tech = None   # tech-agnostic functional lesson: applies to any migration
         entry = kb.add_feedback({
             "migrationId": mid,
             "apiName": mig.get("apiName"),
