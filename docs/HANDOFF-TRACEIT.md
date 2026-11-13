@@ -31,6 +31,22 @@ The three layers (System / Experience / Process) are deployed and labelled
 
 ---
 
+## 1a. Deployment topology — ONLY the UI moves to TraceIT
+
+Important: the test/deploy environment does **not** move. The POC server `13.140.56.229` stays the
+place where WSO2 on Kubernetes (k3s) runs — the Migration Tool backend, the migrated APIs, the test
+doubles, Prometheus and the sentinel all continue to live there (and later, each workspace's own
+servers via provisioning in §6). **Only the UI is reimplemented inside TraceIT.** The TraceIT UI is a
+thin client that calls the existing backend over the network; it builds and deploys nothing itself.
+
+Base URLs the TraceIT UI must call (set via env, do not hard-code):
+- Migration Tool backend / API (§3): `http://13.140.56.229:30900` — header `X-Admin-Token`.
+- Playground/verify/parity/optimize all go through that backend (server-side proxy; no CORS).
+- Sentinel monitoring API (§5): `http://13.140.56.229:30880` — `Authorization: Bearer <MONITOR_API_TOKEN>`.
+
+So: TraceIT hosts the UI only; all build/test/deploy and monitoring stay on the POC server (then on
+the provisioned workspace servers). Do not re-implement the backend in TraceIT.
+
 ## 2. Two things to build in TraceIT
 
 1. **The product UI** (section 4): implement the approved design in TraceIT's web app.
