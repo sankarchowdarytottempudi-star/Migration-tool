@@ -10,8 +10,18 @@ import hmac
 import json
 import os
 import secrets
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
+
+# Deployed APIs the playground may call, by in-cluster DNS (allowlist prevents SSRF).
+PROXY_TARGETS = {
+    "exp": "http://reservation-mgr-exp-api.wso2.svc",
+    "sys": "http://seaware-sys-api.wso2.svc",
+    "proc": "http://seaware-cache-proc-api.wso2.svc",
+    "zoho": "http://zoho-sys-api.wso2.svc",
+}
 
 import kb
 import model as M
@@ -176,6 +186,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(401, {"error": "unauthorized"})
         if p == "/api/migrations":
             return self._create()
+        if p == "/api/proxy":
+            return self._proxy()
         parts = p.split("/")
         if len(parts) >= 5 and parts[1] == "api" and parts[2] == "migrations":
             mid = parts[3]
@@ -189,6 +201,31 @@ class Handler(BaseHTTPRequestHandler):
             if parts[4] == "feedback":
                 return self._feedback(mid)
         return self._json(404, {"error": "not found"})
+
+    def _proxy(self):
+        """Server-side call to a deployed API so the browser never faces CORS/CSP."""
+        try:
+            payload = json.loads(self._body() or b"{}")
+        except ValueError:
+            return self._json(400, {"error": "bad json"})
+        base = PROXY_TARGETS.get(payload.get("service"))
+        if not base:
+            return self._json(400, {"error": "unknown service"})
+        path = payload.get("path", "/")
+        if not path.startswith("/"):
+            path = "/" + path
+        method = (payload.get("method") or "POST").upper()
+        headers = payload.get("headers") or {}
+        body = payload.get("body")
+        data = body.encode() if isinstance(body, str) and body else None
+        req = urllib.request.Request(base + path, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return self._json(200, {"status": r.status, "body": r.read().decode(errors="replace")})
+        except urllib.error.HTTPError as e:
+            return self._json(200, {"status": e.code, "body": e.read().decode(errors="replace")})
+        except Exception as e:
+            return self._json(200, {"status": 0, "body": f"proxy error: {e}"})
 
     def _feedback(self, mid):
         try:

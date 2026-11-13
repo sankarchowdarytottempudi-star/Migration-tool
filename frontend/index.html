@@ -22,6 +22,7 @@
     <div class="brand"><span class="dot"></span> Migration Tool</div>
     <div class="head-stats" id="headStats"></div>
     <div class="head-actions">
+      <button id="playBtn" class="ghost">API Playground</button>
       <button id="kbBtn" class="ghost">Knowledge base</button>
       <button id="newBtn" class="primary">+ New migration</button>
       <button id="logoutBtn" class="ghost">Lock</button>
@@ -51,6 +52,31 @@
     </div>
     <p id="newError" class="err"></p>
   </form>
+</div>
+
+<div id="playModal" class="modal hidden">
+  <div class="card wide">
+    <div class="row-between"><h2>API Playground</h2><button class="ghost" id="playClose">Close</button></div>
+    <p class="muted sm">Calls the deployed APIs server-side, so no CORS or browser blocking. Pick an API, adjust if needed, Send.</p>
+    <label>API</label>
+    <select id="plSvc">
+      <option value="exp">Experience — reservation-mgr-exp-api</option>
+      <option value="sys">System — seaware-sys-api</option>
+      <option value="proc">Process — seaware-cache-proc-api</option>
+      <option value="zoho">ZOHO — zoho-sys-api</option>
+    </select>
+    <div class="pl-row">
+      <select id="plMethod"><option>POST</option><option>GET</option></select>
+      <input id="plPath" placeholder="/path">
+    </div>
+    <label>Headers (JSON)</label>
+    <textarea id="plHeaders" rows="3"></textarea>
+    <label>Body</label>
+    <textarea id="plBody" rows="3"></textarea>
+    <div class="row-end"><button class="primary" id="plSend">Send</button></div>
+    <label>Response</label>
+    <pre id="plResp" class="resp">—</pre>
+  </div>
 </div>
 
 <div id="kbModal" class="modal hidden">

@@ -221,6 +221,37 @@ $("#newForm").addEventListener("submit", async (e) => {
 
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 
+// ---------- API playground ----------
+const PRESETS = {
+  exp:  { method:"POST", path:"/reservation-mgr-exp-api/v1/integration-tasks",
+    headers:{Authorization:"Bearer e2e-secret-token-123","client_channel":"web","Content-Type":"application/json"},
+    body:'{"query":"query AvailableVoyages { availableVoyages { pkg { key } } }"}' },
+  sys:  { method:"POST", path:"/seaware-sys-api/v1/integration-tasks",
+    headers:{Authorization:"Bearer e2e-secret-token-123","Content-Type":"application/json"},
+    body:'{"query":"query AvailableVoyages { availableVoyages { pkg { key } } }"}' },
+  proc: { method:"POST", path:"/seaware-cache-proc-api/v1/cache",
+    headers:{"operationName":"availableVoyages","Content-Type":"application/json"},
+    body:'{"query":"query AvailableVoyages { availableVoyages { pkg { key } } }"}' },
+  zoho: { method:"GET", path:"/health/ready", headers:{}, body:"" },
+};
+function plFill(){ const p=PRESETS[$("#plSvc").value];
+  $("#plMethod").value=p.method; $("#plPath").value=p.path;
+  $("#plHeaders").value=JSON.stringify(p.headers,null,2); $("#plBody").value=p.body; $("#plResp").textContent="—"; }
+$("#playBtn").addEventListener("click",()=>{$("#playModal").classList.remove("hidden");plFill();});
+$("#playClose").addEventListener("click",()=>$("#playModal").classList.add("hidden"));
+$("#plSvc").addEventListener("change",plFill);
+$("#plSend").addEventListener("click",async()=>{
+  let headers={}; try{headers=JSON.parse($("#plHeaders").value||"{}");}
+  catch{ $("#plResp").textContent="Headers must be valid JSON"; return; }
+  $("#plResp").textContent="…sending";
+  const r=await api("/api/proxy",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({service:$("#plSvc").value,method:$("#plMethod").value,
+      path:$("#plPath").value,headers,body:$("#plBody").value})});
+  const d=await r.json();
+  let pretty=d.body; try{pretty=JSON.stringify(JSON.parse(d.body),null,2);}catch{}
+  $("#plResp").textContent="HTTP "+d.status+"\n\n"+pretty;
+});
+
 // ---------- boot ----------
 (async function(){
   if(!TOKEN) return showLogin("");

@@ -134,3 +134,9 @@ select{width:100%;padding:9px;border-radius:8px;border:1px solid var(--line);bac
 .fb-sum{font-weight:600} .fb ul{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:13px}
 .testurl{background:#0d2a16;border:1px solid #238636;border-radius:10px;padding:10px 14px;margin:12px 0;font-size:13px}
 .testurl a{color:#7ee787}
+.pl-row{display:flex;gap:8px;margin:6px 0 12px}
+.pl-row #plMethod{width:100px} .pl-row #plPath{flex:1;margin:0}
+#playModal textarea{width:100%;background:#0b0f14;color:var(--text);border:1px solid var(--line);
+  border-radius:8px;padding:9px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.resp{background:#070a0e;border:1px solid var(--line);border-radius:8px;padding:12px;
+  font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto;color:#7ee787}
