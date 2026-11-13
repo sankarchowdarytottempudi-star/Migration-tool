@@ -416,7 +416,7 @@ async function loadOps() {
     const known = knownPreset(a && a.apiName), eps = (a && a.endpoints) || [];
     sel.innerHTML = eps.map((e, i) => `<option value="${i}">${e.method} ${esc((e.path||"").replace(/\$\{app\.name\}/g, a.apiName))}</option>`).join("")
       || '<option value="">health check (no operations generated)</option>';
-    sel.parentElement.style.display = known ? "none" : "";   // known APIs use their fixed contract
+    const wrap = $("#plOpWrap"); if (wrap) wrap.style.display = known ? "none" : "";   // known APIs use their fixed contract
   }
   plFill();
 }
