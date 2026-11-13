@@ -23,12 +23,28 @@ PROXY_TARGETS = {
     "zoho": "http://zoho-sys-api.wso2.svc",
 }
 
+import env_store
 import kb
 import model as M
 import orchestrator
 import store
 import seed
 from runner import get_runner, PLATFORM_DIR
+
+
+def _http_call(base, path, method, headers, body, timeout=20):
+    if not path.startswith("/"):
+        path = "/" + path
+    data = body.encode() if isinstance(body, str) and body else None
+    req = urllib.request.Request(base + path, data=data,
+                                 method=(method or "POST").upper(), headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read().decode(errors="replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode(errors="replace")
+    except Exception as e:
+        return 0, f"connection error: {e}"
 
 _DOC_NAMES = {"TECHNICAL.md", "MAPPING.md", "FUNCTIONAL.md", "ESTIMATE.md", "inventory.json"}
 
@@ -116,6 +132,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"workspaces": self._workspaces()})
         if p == "/api/knowledge":
             return self._json(200, {"feedback": kb.all_feedback()})
+        if p == "/api/environments":
+            return self._json(200, {"environments": env_store.list_all()})
         if p.startswith("/api/migrations/"):
             parts = p.split("/")          # '', api, migrations, id, [docs|feedback], [name]
             mid = parts[3]
@@ -188,6 +206,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._create()
         if p == "/api/proxy":
             return self._proxy()
+        if p == "/api/environments":
+            return self._create_env()
         parts = p.split("/")
         if len(parts) >= 5 and parts[1] == "api" and parts[2] == "migrations":
             mid = parts[3]
@@ -200,32 +220,73 @@ class Handler(BaseHTTPRequestHandler):
                 return self._advance(mid)
             if parts[4] == "feedback":
                 return self._feedback(mid)
+            if parts[4] == "verify":
+                return self._verify(mid)
         return self._json(404, {"error": "not found"})
 
-    def _proxy(self):
-        """Server-side call to a deployed API so the browser never faces CORS/CSP."""
+    def _create_env(self):
         try:
             payload = json.loads(self._body() or b"{}")
         except ValueError:
             return self._json(400, {"error": "bad json"})
+        if not payload.get("name") or not payload.get("baseUrl"):
+            return self._json(400, {"error": "name and baseUrl required"})
+        return self._json(201, env_store.add(payload))
+
+    def _resolve_target(self, payload):
+        """Return (base_url, headers) for a request: a registered environment (envId) or the
+        in-cluster test double (service). Adds the env's token unless the caller set one."""
+        headers = dict(payload.get("headers") or {})
+        env_id = payload.get("envId")
+        if env_id:
+            env = env_store.get(env_id)
+            if not env:
+                return None, None
+            if env.get("token") and not any(k.lower() == "authorization" for k in headers):
+                headers["Authorization"] = "Bearer " + env["token"]
+            return env["baseUrl"], headers
         base = PROXY_TARGETS.get(payload.get("service"))
-        if not base:
-            return self._json(400, {"error": "unknown service"})
-        path = payload.get("path", "/")
-        if not path.startswith("/"):
-            path = "/" + path
-        method = (payload.get("method") or "POST").upper()
-        headers = payload.get("headers") or {}
-        body = payload.get("body")
-        data = body.encode() if isinstance(body, str) and body else None
-        req = urllib.request.Request(base + path, data=data, method=method, headers=headers)
+        return base, headers
+
+    def _proxy(self):
+        """Server-side call so the browser never faces CORS/CSP. Targets a registered
+        environment (envId) or the in-cluster test double (service)."""
         try:
-            with urllib.request.urlopen(req, timeout=15) as r:
-                return self._json(200, {"status": r.status, "body": r.read().decode(errors="replace")})
-        except urllib.error.HTTPError as e:
-            return self._json(200, {"status": e.code, "body": e.read().decode(errors="replace")})
-        except Exception as e:
-            return self._json(200, {"status": 0, "body": f"proxy error: {e}"})
+            payload = json.loads(self._body() or b"{}")
+        except ValueError:
+            return self._json(400, {"error": "bad json"})
+        base, headers = self._resolve_target(payload)
+        if not base:
+            return self._json(400, {"error": "unknown service or environment"})
+        status, text = _http_call(base, payload.get("path", "/"), payload.get("method"),
+                                   headers, payload.get("body"))
+        return self._json(200, {"status": status, "body": text})
+
+    def _verify(self, mid):
+        """Fetch data from the chosen environment; mark the migration verified only on success."""
+        try:
+            payload = json.loads(self._body() or b"{}")
+        except ValueError:
+            return self._json(400, {"error": "bad json"})
+        env = env_store.get(payload.get("envId"))
+        if not env:
+            return self._json(400, {"error": "unknown environment"})
+        base, headers = self._resolve_target(payload)
+        status, text = _http_call(base, payload.get("path", "/"), payload.get("method"),
+                                   headers, payload.get("body"))
+        ok = status == 200 and len(text.strip()) > 0
+        with store.lock():
+            m = store.get(mid)
+            if ok:
+                m["verifiedEnv"] = env["name"]
+                m["verifiedAt"] = M._now()
+                m["verifySample"] = text[:2000]
+                M.log(m, f"verified against environment '{env['name']}' (HTTP {status}); "
+                         f"migration complete")
+            else:
+                M.log(m, f"verification against '{env['name']}' failed (HTTP {status})", "error")
+            store.save(m)
+        return self._json(200, {"ok": ok, "status": status, "body": text})
 
     def _feedback(self, mid):
         try:
@@ -269,6 +330,8 @@ class Handler(BaseHTTPRequestHandler):
             if os.path.exists(path):
                 os.remove(path)
                 return self._json(200, {"ok": True})
+        if len(parts) >= 4 and parts[2] == "environments":
+            return self._json(200, {"ok": env_store.delete(parts[3])})
         return self._json(404, {"error": "not found"})
 
     def _create(self):

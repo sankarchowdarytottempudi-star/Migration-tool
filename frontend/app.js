@@ -4,6 +4,18 @@ let selected = null;
 let pollTimer = null;
 const docsCache = {};   // id -> [{name}]
 const fbCache = {};     // id -> [feedback]
+let ENVS = [];          // registered environments
+const vfState = {};     // id -> {resp, envId} (kept across polls so the UI doesn't reset)
+
+async function loadEnvs() {
+  try { ENVS = (await (await api("/api/environments")).json()).environments || []; }
+  catch { ENVS = []; }
+  const el = $("#plEnv"); if (el) el.innerHTML = envOptions(el.value);
+}
+function envOptions(sel) {
+  return '<option value="">VM cluster (test double)</option>' +
+    ENVS.map(e => `<option value="${e.id}" ${e.id === sel ? "selected" : ""}>${esc(e.name)} — ${esc(e.baseUrl)}</option>`).join("");
+}
 
 async function api(path, opts = {}) {
   const r = await fetch(path, {
@@ -18,7 +30,7 @@ function showLogin(msg) {
   $("#app").classList.add("hidden"); $("#login").classList.remove("hidden");
   $("#loginError").textContent = msg || "";
 }
-function showApp() { $("#login").classList.add("hidden"); $("#app").classList.remove("hidden"); loadList(); }
+function showApp() { $("#login").classList.add("hidden"); $("#app").classList.remove("hidden"); loadEnvs(); loadList(); }
 $("#loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   TOKEN = $("#tokenInput").value.trim();
@@ -118,6 +130,16 @@ function renderDetail(m) {
       ${m.phases.map((ph) => phaseHTML(m.id, ph)).join("")}
     </div>
 
+    <div class="section"><h3>Environment verification</h3>
+      ${m.verifiedEnv ? `<div class="verified">✓ Verified against <b>${esc(m.verifiedEnv)}</b> on ${(m.verifiedAt||"").slice(0,19).replace("T"," ")} — migration complete</div>`
+        : '<div class="muted">Choose the environment to connect to, fetch its data, and complete the migration. Add environments in the API Playground.</div>'}
+      <div class="pl-row">
+        <select id="vfEnv">${envOptions(vfState[m.id] ? vfState[m.id].envId : "")}</select>
+        <button class="primary" onclick="verifyMig('${m.id}')">Fetch env data &amp; complete</button>
+      </div>
+      <pre id="vfResp" class="resp">${esc(vfState[m.id] ? vfState[m.id].resp : "—")}</pre>
+    </div>
+
     <div class="section"><h3>Reviewer feedback</h3>
       ${feedbackFormHTML(m)}
       ${fb.length ? fb.map(fbHTML).join("") : '<div class="muted">No feedback yet.</div>'}
@@ -187,7 +209,29 @@ async function submitFeedback(e,id){
     body:JSON.stringify({scope,summary,mistakes})});
   await loadFeedback(id); refreshDetail();
 }
-window.run=run;window.advance=advance;window.delMig=delMig;window.dlDoc=dlDoc;window.submitFeedback=submitFeedback;
+function presetForMigration(m){
+  if(m.layer==="experience")return PRESETS.exp;
+  if(m.layer==="process")return PRESETS.proc;
+  if(m.apiName&&m.apiName.indexOf("seaware-sys")>=0)return PRESETS.sys;
+  if(m.layer==="system")return {method:"GET",path:"/health/ready",headers:{},body:""};
+  return PRESETS.exp;
+}
+async function verifyMig(id){
+  const envId=$("#vfEnv").value;
+  if(!envId){ vfState[id]={resp:"Select an environment first (add one in the API Playground).",envId:""}; return refreshDetail(); }
+  const m=await (await api(`/api/migrations/${id}`)).json();
+  const pr=presetForMigration(m);
+  const headers={...pr.headers}; delete headers.Authorization;   // use the environment's own token
+  vfState[id]={resp:"…fetching from environment",envId};
+  refreshDetail();
+  const r=await api(`/api/migrations/${id}/verify`,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({envId,method:pr.method,path:pr.path,headers,body:pr.body})});
+  const d=await r.json();
+  let pretty=d.body; try{pretty=JSON.stringify(JSON.parse(d.body),null,2);}catch{}
+  vfState[id]={resp:(d.ok?"✓ VERIFIED — HTTP ":"✗ not verified — HTTP ")+d.status+"\n\n"+pretty,envId};
+  await loadList(); refreshDetail();
+}
+window.run=run;window.advance=advance;window.delMig=delMig;window.dlDoc=dlDoc;window.submitFeedback=submitFeedback;window.verifyMig=verifyMig;
 
 // ---------- knowledge base modal ----------
 $("#kbBtn").addEventListener("click", async () => {
@@ -237,15 +281,24 @@ const PRESETS = {
 function plFill(){ const p=PRESETS[$("#plSvc").value];
   $("#plMethod").value=p.method; $("#plPath").value=p.path;
   $("#plHeaders").value=JSON.stringify(p.headers,null,2); $("#plBody").value=p.body; $("#plResp").textContent="—"; }
-$("#playBtn").addEventListener("click",()=>{$("#playModal").classList.remove("hidden");plFill();});
+$("#playBtn").addEventListener("click",async()=>{await loadEnvs();$("#playModal").classList.remove("hidden");plFill();});
 $("#playClose").addEventListener("click",()=>$("#playModal").classList.add("hidden"));
 $("#plSvc").addEventListener("change",plFill);
+$("#plAddEnv").addEventListener("click",()=>$("#plEnvForm").classList.toggle("hidden"));
+$("#envSave").addEventListener("click",async()=>{
+  const name=$("#envName").value.trim(), baseUrl=$("#envUrl").value.trim(), token=$("#envToken").value.trim();
+  if(!name||!baseUrl)return;
+  await api("/api/environments",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({name,baseUrl,token})});
+  $("#envName").value="";$("#envUrl").value="";$("#envToken").value="";
+  $("#plEnvForm").classList.add("hidden"); await loadEnvs();
+});
 $("#plSend").addEventListener("click",async()=>{
   let headers={}; try{headers=JSON.parse($("#plHeaders").value||"{}");}
   catch{ $("#plResp").textContent="Headers must be valid JSON"; return; }
   $("#plResp").textContent="…sending";
   const r=await api("/api/proxy",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({service:$("#plSvc").value,method:$("#plMethod").value,
+    body:JSON.stringify({envId:$("#plEnv").value,service:$("#plSvc").value,method:$("#plMethod").value,
       path:$("#plPath").value,headers,body:$("#plBody").value})});
   const d=await r.json();
   let pretty=d.body; try{pretty=JSON.stringify(JSON.parse(d.body),null,2);}catch{}

@@ -207,6 +207,8 @@ def summarize(mig: dict) -> dict:
 def _outcome(mig, overall_pct):
     if any(p["status"] == FAILED for p in mig["phases"]):
         return "Failed"
+    if mig.get("verifiedEnv"):
+        return "Verified"
     if phase(mig, "deploy")["status"] == DONE:
         return "Deployed"
     if overall_pct >= 99.9:

@@ -57,7 +57,18 @@
 <div id="playModal" class="modal hidden">
   <div class="card wide">
     <div class="row-between"><h2>API Playground</h2><button class="ghost" id="playClose">Close</button></div>
-    <p class="muted sm">Calls the deployed APIs server-side, so no CORS or browser blocking. Pick an API, adjust if needed, Send.</p>
+    <p class="muted sm">Calls the API server-side, so no CORS or browser blocking. Pick the environment and API, adjust if needed, Send.</p>
+    <label>Environment</label>
+    <div class="pl-row">
+      <select id="plEnv"><option value="">VM cluster (test double)</option></select>
+      <button type="button" class="ghost" id="plAddEnv">+ Add env</button>
+    </div>
+    <div id="plEnvForm" class="hidden envform">
+      <input id="envName" placeholder="Env name (e.g. test, uat)">
+      <input id="envUrl" placeholder="API base URL in that env (e.g. https://test-int-api:30082)">
+      <input id="envToken" placeholder="Auth token for that env (optional)">
+      <div class="row-end"><button type="button" class="primary" id="envSave">Save environment</button></div>
+    </div>
     <label>API</label>
     <select id="plSvc">
       <option value="exp">Experience — reservation-mgr-exp-api</option>

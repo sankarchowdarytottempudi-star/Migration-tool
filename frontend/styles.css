@@ -140,3 +140,7 @@ select{width:100%;padding:9px;border-radius:8px;border:1px solid var(--line);bac
   border-radius:8px;padding:9px;font-family:ui-monospace,Menlo,monospace;font-size:12px}
 .resp{background:#070a0e;border:1px solid var(--line);border-radius:8px;padding:12px;
   font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:pre-wrap;max-height:260px;overflow:auto;color:#7ee787}
+.envform{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin:0 0 12px;display:grid;gap:8px}
+.envform input{margin:0}
+.verified{background:#0d2a16;border:1px solid #238636;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:13px;color:#7ee787}
+.oc-verified{color:#7ee787;border-color:#2ea043;background:#0d2a16}
