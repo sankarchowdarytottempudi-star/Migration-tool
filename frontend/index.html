@@ -22,6 +22,7 @@
     <div class="brand"><span class="dot"></span> Migration Tool</div>
     <div class="head-stats" id="headStats"></div>
     <div class="head-actions">
+      <button id="wsBtn" class="ghost">Workspaces</button>
       <button id="playBtn" class="ghost">API Playground</button>
       <button id="kbBtn" class="ghost">Knowledge base</button>
       <button id="newBtn" class="primary">+ New migration</button>
@@ -52,6 +53,20 @@
     </div>
     <p id="newError" class="err"></p>
   </form>
+</div>
+
+<div id="wsModal" class="modal hidden">
+  <div class="card wide">
+    <div class="row-between"><h2>Workspaces &amp; target servers</h2><button class="ghost" id="wsClose">Close</button></div>
+    <p class="muted sm">WSO2 + Kubernetes are installed on these servers — not the POC box. At least one of
+      Dev / QA / UAT is required; Prod can be added later.</p>
+    <input id="wsName" placeholder="Workspace name (e.g. Cruise Saudi Workspace)">
+    <div id="wsServers"></div>
+    <p id="wsError" class="err"></p>
+    <div class="row-end"><button class="primary" id="wsSave">Save workspace</button></div>
+    <h3 style="margin-top:18px">Configured workspaces</h3>
+    <div id="wsList"></div>
+  </div>
 </div>
 
 <div id="playModal" class="modal hidden">

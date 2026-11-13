@@ -29,6 +29,7 @@ import model as M
 import orchestrator
 import store
 import seed
+import ws_store
 from runner import get_runner, PLATFORM_DIR
 
 
@@ -151,6 +152,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {"feedback": kb.all_feedback()})
         if p == "/api/environments":
             return self._json(200, {"environments": env_store.list_all()})
+        if p == "/api/workspace-configs":
+            return self._json(200, {"workspaces": ws_store.list_all()})
         if p.startswith("/api/migrations/"):
             parts = p.split("/")          # '', api, migrations, id, [docs|feedback], [name]
             mid = parts[3]
@@ -225,6 +228,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._proxy()
         if p == "/api/environments":
             return self._create_env()
+        if p == "/api/workspace-configs":
+            return self._create_ws()
         parts = p.split("/")
         if len(parts) >= 5 and parts[1] == "api" and parts[2] == "migrations":
             mid = parts[3]
@@ -249,6 +254,16 @@ class Handler(BaseHTTPRequestHandler):
         if not payload.get("name") or not payload.get("baseUrl"):
             return self._json(400, {"error": "name and baseUrl required"})
         return self._json(201, env_store.add(payload))
+
+    def _create_ws(self):
+        try:
+            payload = json.loads(self._body() or b"{}")
+        except ValueError:
+            return self._json(400, {"error": "bad json"})
+        try:
+            return self._json(201, ws_store.add(payload))
+        except ws_store.ValidationError as e:
+            return self._json(400, {"error": str(e)})
 
     def _resolve_target(self, payload):
         """Return (base_url, headers) for a request: a registered environment (envId) or the
@@ -353,6 +368,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, {"ok": True})
         if len(parts) >= 4 and parts[2] == "environments":
             return self._json(200, {"ok": env_store.delete(parts[3])})
+        if len(parts) >= 4 and parts[2] == "workspace-configs":
+            return self._json(200, {"ok": ws_store.delete(parts[3])})
         return self._json(404, {"error": "not found"})
 
     def _create(self):

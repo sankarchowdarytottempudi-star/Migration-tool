@@ -262,6 +262,47 @@ $("#kbBtn").addEventListener("click", async () => {
 });
 $("#kbClose").addEventListener("click", () => $("#kbModal").classList.add("hidden"));
 
+// ---------- workspaces & target servers ----------
+const WS_TIERS = [["dev","Dev"],["qa","QA"],["uat","UAT"],["prod","Prod (optional)"]];
+function wsServersHTML(){
+  return WS_TIERS.map(([k,label])=>`<div class="wsrv">
+    <div class="wsrv-h">${label}</div>
+    <div class="wsrv-row">
+      <input id="ws_${k}_host" placeholder="host / IP">
+      <input id="ws_${k}_port" placeholder="port" value="22" style="max-width:80px">
+      <input id="ws_${k}_user" placeholder="username">
+      <input id="ws_${k}_pass" type="password" placeholder="password">
+    </div></div>`).join("");
+}
+$("#wsBtn").addEventListener("click",async()=>{
+  $("#wsServers").innerHTML=wsServersHTML(); $("#wsError").textContent=""; $("#wsName").value="";
+  $("#wsModal").classList.remove("hidden"); loadWsConfigs();
+});
+$("#wsClose").addEventListener("click",()=>$("#wsModal").classList.add("hidden"));
+$("#wsSave").addEventListener("click",async()=>{
+  const servers={};
+  WS_TIERS.forEach(([k])=>{
+    const host=$(`#ws_${k}_host`).value.trim();
+    if(host) servers[k]={host,port:$(`#ws_${k}_port`).value.trim()||"22",
+      username:$(`#ws_${k}_user`).value.trim(),password:$(`#ws_${k}_pass`).value};
+  });
+  const r=await api("/api/workspace-configs",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({name:$("#wsName").value.trim(),servers})});
+  const d=await r.json();
+  if(!r.ok){ $("#wsError").textContent=d.error||"failed"; return; }
+  $("#wsError").textContent=""; $("#wsName").value=""; $("#wsServers").innerHTML=wsServersHTML(); loadWsConfigs();
+});
+async function loadWsConfigs(){
+  const d=await (await api("/api/workspace-configs")).json();
+  $("#wsList").innerHTML=(d.workspaces||[]).map(w=>`<div class="wsitem">
+    <div class="row-between"><b>${esc(w.name)}</b><button class="ghost" onclick="delWs('${w.id}')">Delete</button></div>
+    <div class="muted sm">${Object.entries(w.servers).map(([t,s])=>`${t.toUpperCase()}: ${esc(s.username)}@${esc(s.host)}:${s.port}${s.provisioned?" ✓":""}`).join(" · ")||"no servers"}</div>
+  </div>`).join("")||'<div class="muted">None yet.</div>';
+}
+async function delWs(id){ if(!confirm("Delete this workspace config?"))return;
+  await api(`/api/workspace-configs/${id}`,{method:"DELETE"}); loadWsConfigs(); }
+window.delWs=delWs;
+
 // ---------- new migration ----------
 $("#newBtn").addEventListener("click", () => $("#modal").classList.remove("hidden"));
 $("#cancelNew").addEventListener("click", () => $("#modal").classList.add("hidden"));
