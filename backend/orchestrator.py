@@ -382,7 +382,9 @@ def _ensure_in_workspace(r, api):
             "m='packages = ['+chr(10);"
             "s=(s if t in s else s.replace(m, m+'    \"'+t+'\",'+chr(10),1));"
             "open(p,'w').write(s)")
-    r.run("python3 -c " + _q(code))
+    # Serialize the read-modify-write of the shared workspace file so two migrations running
+    # at the same time cannot clobber each other's package entry.
+    r.run("flock " + _q(toml + ".lock") + " python3 -c " + _q(code))
 
 
 def _ensure_deploy_assets(r, api, layer):
