@@ -39,6 +39,7 @@ SVC_PRESETS = {
     "zoho": ("GET", "/health/ready", {}, ""),
 }
 
+import detection
 import env_store
 import kb
 import model as M
@@ -398,6 +399,13 @@ class Handler(BaseHTTPRequestHandler):
                                        headers, payload.get("body"))
         ok = status == 200 and len(text.strip()) > 0
         slo = _slo(ms)
+        # Default quality gate: on failure, auto-diagnose the backend error (no technical user
+        # needed) and record it as a cross-workspace lesson so the agent fixes it next time.
+        finding = None
+        if not ok:
+            f = detection.classify_error(text)
+            if f:
+                finding = f.to_dict()
         with store.lock():
             m = store.get(mid)
             if ok:
@@ -411,8 +419,20 @@ class Handler(BaseHTTPRequestHandler):
                     M.log(m, f"response {ms} ms exceeds the 1000 ms target — optimization needed", "warn")
             else:
                 M.log(m, f"verification against '{env['name']}' failed (HTTP {status})", "error")
+                if finding:
+                    M.log(m, f"auto-diagnosis [{finding['klass']}]: {finding['root_cause']} "
+                             f"Fix: {finding['fix']}", "warn")
+                    try:
+                        kb.add_feedback({"scope": "functional", "technology": None,
+                                         "phase": "test", "apiName": m.get("apiName"),
+                                         "workspace": m.get("workspace"),
+                                         "summary": finding["lesson"],
+                                         "mistakes": [finding["root_cause"], finding["fix"]]})
+                    except Exception:
+                        pass
             store.save(m)
-        return self._json(200, {"ok": ok, "status": status, "body": text, "ms": ms, "slo": slo})
+        return self._json(200, {"ok": ok, "status": status, "body": text, "ms": ms, "slo": slo,
+                                "finding": finding})
 
     def _parity(self, mid):
         """Call the legacy environment and the migrated API with the same request; diff them."""
