@@ -98,6 +98,10 @@ async function loadFeedback(id){ try{ fbCache[id]=(await (await api(`/api/migrat
 
 async function refreshDetail() {
   if (!selected) return;
+  // Don't re-render (which rebuilds the panel) while the user is typing in a field — that was
+  // wiping the Reviewer feedback inputs every poll.
+  const ae = document.activeElement;
+  if (ae && $("#detail").contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return;
   const r = await api(`/api/migrations/${selected}`);
   if (r.ok) renderDetail(await r.json());
 }
