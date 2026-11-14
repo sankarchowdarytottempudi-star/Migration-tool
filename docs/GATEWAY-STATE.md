@@ -90,3 +90,14 @@ being worked on.
 - **get-all-checks**: no equivalent exists on the current site, so no contract. Its
   business purpose must be defined (replace the post-payment status check, or a separate
   reconciliation job) before it can be migrated.
+
+## Gateway security (enabled 2026-11-14)
+
+Both published APIs now require OAuth2 at the gateway (open-source WSO2 Key Manager, no license fee).
+
+- **Auth:** `securityScheme: oauth2`, operations require an application token. Verified: no token = 401, valid token = 200.
+- **Subscription:** devportal application `aroya-connector` (appId `c312bcb4-0e90-4db0-909f-050aa2196212`) is subscribed to both APIs. A caller needs valid keys + subscription or it is refused.
+- **Throttling:** API-level advanced policy `AroyaApiLimit` = 6000 req/min on both APIs. (Subscription tiers Gold/Silver are role-restricted for the admin user in this APIM, so the limit is enforced at the API level instead.)
+- **Keys/token:** consumer key/secret issued to the connector (not stored here). Token: `POST https://13.140.56.229:30443/oauth2/token` with `grant_type=client_credentials` and the key/secret.
+- **Caveat:** this secures only the gateway path (30280/30243). The raw per-API NodePorts remain open and bypass auth; lock them down (ClusterIP-only) once the connector moves to the gateway.
+- **IP whitelisting:** pending the connector's source IP.
